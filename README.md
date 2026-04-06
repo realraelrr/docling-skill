@@ -2,6 +2,8 @@
 
 `docling-skill` is an agent-first PDF ingestion layer built on top of [Docling](https://github.com/docling-project/docling).
 
+[中文说明](README.zh-CN.md)
+
 It turns a PDF into three artifacts that LLM agents can consume directly:
 
 - `foo.md`: agent-readable markdown
@@ -26,14 +28,23 @@ This repository is intentionally a thin layer on top of official `docling`, not 
 ## Quickstart
 
 ```bash
-pip install -e .
+pip install "git+https://github.com/realraelrr/docling-skill.git@v0.1.0"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
 If your runtime uses SOCKS proxies, prefer:
 
 ```bash
-pip install -e '.[proxy]'
+pip install "git+https://github.com/realraelrr/docling-skill.git@v0.1.0"
+pip install socksio
+```
+
+For local development:
+
+```bash
+git clone https://github.com/realraelrr/docling-skill.git
+cd docling-skill
+pip install -e .
 ```
 
 ## Homepage Example
