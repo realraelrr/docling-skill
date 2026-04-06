@@ -1,0 +1,4 @@
+interface:
+  display_name: "docling-skill"
+  short_description: "Use this repo to convert PDFs into agent sidecars"
+  default_prompt: "Use $docling-skill to convert this PDF into sidecar outputs in a caller-chosen directory."
