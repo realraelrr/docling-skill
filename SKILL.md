@@ -78,6 +78,12 @@ Minimum fields to inspect:
 - `manifest["quality"]["content_trust"]`
 - `manifest["selected_attempt"]`
 
+Minimal example:
+
+```bash
+python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/file.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "reasons": m["quality"]["reasons"], "selected_attempt": m["selected_attempt"]})'
+```
+
 ## Decision Flow
 1. Resolve the input PDF path and an explicit output directory.
 2. Run the extractor.
@@ -106,16 +112,16 @@ Basic conversion:
 
 ```bash
 conda run -n docling python -m docling_skill.cli \
-  "/Users/rael/Documents/papers/2510.12399v2.pdf" \
-  "/tmp/vibe-paper-sidecar"
+  "/path/to/file.pdf" \
+  "/tmp/docling-sidecar"
 ```
 
 Chinese OCR with explicit language and output path:
 
 ```bash
 conda run -n docling python -m docling_skill.cli \
-  "/Users/rael/Documents/papers/AI技术分享：门童与厨子模式.pdf" \
-  "/tmp/openclaw-cn-sidecar" \
+  "/path/to/chinese-file.pdf" \
+  "/tmp/docling-sidecar-cn" \
   --ocr-engine tesseract \
   --ocr-lang chi_sim
 ```
