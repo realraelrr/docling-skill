@@ -12,7 +12,7 @@
 - `source.manifest.json`：质量、补救路径和路由决策元数据
 - `source.meta.json`：供下游 agent 和 workflow 主控读取的轻量 ingestion 元数据
 
-核心原则很简单：Agent 不应该直接盲信提取出来的 Markdown，而应该先读 manifest，再决定结果是否可用。
+核心原则很简单：Agent 不应该直接盲信提取出来的 Markdown，而应该先读 manifest，再决定结果是否可用。只要 manifest 判断结果可用，Agent 就先读 `source.md`；如果系统需要恢复或深入查看被 Markdown 抹平的结构，再回到 `source.docling.json`。
 
 ## Workflow 边界
 
@@ -84,12 +84,12 @@ python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.
 }
 ```
 
-只有在这一步之后，Agent 才应该继续消费：
+只有在这一步之后，下游才应该继续消费这些产物：
 
-- `/tmp/docling-sidecar/source.md`
-- `/tmp/docling-sidecar/source.docling.json`
-- `/tmp/docling-sidecar/source.images.json`
-- `/tmp/docling-sidecar/source.meta.json`
+- Agent 先读 `/tmp/docling-sidecar/source.md`
+- 系统在需要权威结构或恢复细节时回到 `/tmp/docling-sidecar/source.docling.json`
+- 多模态流程通过 `/tmp/docling-sidecar/source.images.json` 解析图片占位符
+- 编排层可读取 `/tmp/docling-sidecar/source.meta.json`
 
 ## CLI
 
@@ -144,7 +144,7 @@ CLI 会写出：
 - `source.manifest.json`
 - `source.meta.json`
 
-其中 `source.manifest.json` 是下游 Agent 的控制平面，`source.docling.json` 是给需要结构化机器读取的消费者使用的 sidecar，`source.meta.json` 是下游 workflow 的桥接元数据。
+其中 `source.manifest.json` 是下游 Agent 的控制平面，`source.docling.json` 是权威结构 sidecar，供需要机器可读结构或 Markdown 恢复路径的消费者使用，`source.meta.json` 是下游 workflow 的桥接元数据。
 
 重点字段：
 
@@ -152,8 +152,17 @@ CLI 会写出：
 - `manifest["quality"]["agent_ready"]`
 - `manifest["quality"]["reasons"]`
 - `manifest["quality"]["content_trust"]`
+- `manifest["preferred_agent_artifact"]`
+- `manifest["authoritative_artifact"]`
+- `manifest["available_artifacts"]`
 - `manifest["selected_attempt"]`
 - `manifest["ocr_remediation_applied"]`
+
+下游规则：
+
+- 先读 `source.manifest.json`
+- 如果 manifest 判断结果可用，Agent 优先读取 `source.md`
+- 如果系统需要恢复结构、校正 Markdown 歧义，或查看更细的版面信息，再读取 `source.docling.json`
 
 状态含义：
 

@@ -59,6 +59,13 @@ def _assert_source_sidecar_contract(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["document_markdown"] == "source.md"
     assert manifest["images_json"] == "source.images.json"
+    assert manifest["preferred_agent_artifact"] == "source.md"
+    assert manifest["authoritative_artifact"] == "source.docling.json"
+    assert manifest["available_artifacts"] == [
+        "source.md",
+        "source.docling.json",
+        "source.images.json",
+    ]
     assert manifest["input_type"] == expected_input_type
     assert manifest["pipeline_family"] == expected_pipeline_family
     assert manifest["quality"]["status"] == "good"

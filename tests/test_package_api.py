@@ -187,6 +187,13 @@ def test_output_contract_uses_source_sidecars(tmp_path, monkeypatch):
     manifest = json.loads(outputs["manifest_path"].read_text(encoding="utf-8"))
     assert manifest["document_markdown"] == "source.md"
     assert manifest["images_json"] == "source.images.json"
+    assert manifest["preferred_agent_artifact"] == "source.md"
+    assert manifest["authoritative_artifact"] == "source.docling.json"
+    assert manifest["available_artifacts"] == [
+        "source.md",
+        "source.docling.json",
+        "source.images.json",
+    ]
     assert manifest["input_type"] == "pdf"
     assert manifest["pipeline_family"] == "standard_pdf"
 
@@ -246,9 +253,30 @@ def test_pdf_remediation_selection_preserves_salvaged_manifest(tmp_path, monkeyp
     assert outputs["docling_document"] == remediated_attempt.structured_document
     assert manifest["selected_attempt"] == "page_ocr_remediation"
     assert manifest["ocr_remediation_applied"] is True
+    assert manifest["preferred_agent_artifact"] == "source.md"
+    assert manifest["authoritative_artifact"] == "source.docling.json"
+    assert manifest["available_artifacts"] == [
+        "source.md",
+        "source.docling.json",
+        "source.images.json",
+    ]
     assert len(manifest["attempts"]) == 2
     assert manifest["attempts"][0]["attempt"] == "primary"
     assert manifest["attempts"][1]["attempt"] == "page_ocr_remediation"
+    assert manifest["attempts"][0]["preferred_agent_artifact"] == "source.md"
+    assert manifest["attempts"][0]["authoritative_artifact"] == "source.docling.json"
+    assert manifest["attempts"][0]["available_artifacts"] == [
+        "source.md",
+        "source.docling.json",
+        "source.images.json",
+    ]
+    assert manifest["attempts"][1]["preferred_agent_artifact"] == "source.md"
+    assert manifest["attempts"][1]["authoritative_artifact"] == "source.docling.json"
+    assert manifest["attempts"][1]["available_artifacts"] == [
+        "source.md",
+        "source.docling.json",
+        "source.images.json",
+    ]
     assert manifest["quality"]["status"] == "salvaged"
     assert "ocr_remediation_selected" in manifest["quality"]["reasons"]
 

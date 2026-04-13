@@ -57,10 +57,11 @@ The extractor writes:
 
 `source.docling.json`
 - Structured Docling document export from the same conversion result as `source.md`.
-- Use this when a downstream consumer needs machine-readable document structure.
+- Agents should still read `source.md` first after the manifest check.
+- Use `source.docling.json` when a downstream system needs authoritative machine-readable structure, recovery, or deeper inspection beyond Markdown.
 
 `source.manifest.json`
-- Includes `quality` (with nested `content_trust`), `selected_attempt`, and `ocr_remediation_applied`.
+- Includes `quality` (with nested `content_trust`), `preferred_agent_artifact`, `authoritative_artifact`, `available_artifacts`, `selected_attempt`, and `ocr_remediation_applied`.
 - Use this file to decide whether the result is safe to pass downstream.
 
 `source.meta.json`
@@ -90,6 +91,8 @@ Minimum fields to inspect:
 - `manifest["quality"]["status"]`
 - `manifest["quality"]["reasons"]`
 - `manifest["quality"]["content_trust"]`
+- `manifest["preferred_agent_artifact"]`
+- `manifest["authoritative_artifact"]`
 - `manifest["selected_attempt"]`
 
 Minimal example:
@@ -106,8 +109,10 @@ python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.
    - `good`: use `source.md` as the primary text artifact.
    - `salvaged`: use `source.md`, but treat it as OCR-remediated and lower confidence.
    - `failed_for_agent`: do not present it as clean ingestion; report the failure and the manifest reasons.
-5. Check `manifest["selected_attempt"]` to see which attempt won. A remediation attempt can still end as `failed_for_agent`.
-6. If image analysis matters, resolve placeholders through `source.images.json`.
+5. Treat `manifest["preferred_agent_artifact"]` as the default agent entrypoint. In this contract that is always `source.md`.
+6. Treat `manifest["authoritative_artifact"]` as the recovery/deep-inspection artifact. In this contract that is always `source.docling.json`.
+7. Check `manifest["selected_attempt"]` to see which attempt won. A remediation attempt can still end as `failed_for_agent`.
+8. If image analysis matters, resolve placeholders through `source.images.json`.
 
 ## Images
 When analysis depends on a specific figure or chart:

@@ -12,7 +12,7 @@ It turns a local document artifact into workflow-ready artifacts that LLM agents
 - `source.manifest.json`: quality, remediation, and routing metadata
 - `source.meta.json`: lightweight ingestion metadata for downstream agents
 
-The key idea is simple: agents should not trust extracted markdown blindly. They should read the manifest first, then decide whether the result is safe to use.
+The key idea is simple: agents should not trust extracted markdown blindly. They should read the manifest first, then decide whether the result is safe to use. Once the manifest says the extraction is usable, agents read `source.md` first; systems recover or deepen from `source.docling.json` when they need structure that Markdown flattened away.
 
 ## Workflow Boundary
 
@@ -84,12 +84,12 @@ Typical output:
 }
 ```
 
-Only after that should an agent consume:
+Only after that should downstream consumers use the outputs:
 
-- `/tmp/docling-sidecar/source.md`
-- `/tmp/docling-sidecar/source.docling.json`
-- `/tmp/docling-sidecar/source.images.json`
-- `/tmp/docling-sidecar/source.meta.json`
+- Agents read `/tmp/docling-sidecar/source.md` first.
+- Systems recover or deepen from `/tmp/docling-sidecar/source.docling.json` when they need authoritative structure.
+- Multimodal flows resolve placeholders through `/tmp/docling-sidecar/source.images.json`.
+- Orchestrators can read `/tmp/docling-sidecar/source.meta.json`.
 
 ## CLI
 
@@ -145,7 +145,7 @@ The CLI writes:
 - `source.meta.json`
 
 `source.manifest.json` is the control plane for downstream agents.
-`source.docling.json` is the structured sidecar for consumers that need machine-readable document structure.
+`source.docling.json` is the authoritative structured sidecar for consumers that need machine-readable document structure or a recovery path beyond Markdown.
 `source.meta.json` is the bridge metadata for downstream agents and orchestrators.
 
 Important fields:
@@ -154,8 +154,17 @@ Important fields:
 - `manifest["quality"]["agent_ready"]`
 - `manifest["quality"]["reasons"]`
 - `manifest["quality"]["content_trust"]`
+- `manifest["preferred_agent_artifact"]`
+- `manifest["authoritative_artifact"]`
+- `manifest["available_artifacts"]`
 - `manifest["selected_attempt"]`
 - `manifest["ocr_remediation_applied"]`
+
+Downstream rule:
+
+- Read `source.manifest.json` first.
+- If the manifest is usable, agents read `source.md` first.
+- If a system needs to recover structure, reconcile ambiguous Markdown, or inspect layout-aware detail, use `source.docling.json`.
 
 Status meanings:
 

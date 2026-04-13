@@ -36,6 +36,13 @@ SOURCE_DOCLING_JSON_NAME = "source.docling.json"
 SOURCE_IMAGES_NAME = "source.images.json"
 SOURCE_MANIFEST_NAME = "source.manifest.json"
 SOURCE_META_NAME = "source.meta.json"
+AVAILABLE_ARTIFACTS = [
+    SOURCE_MARKDOWN_NAME,
+    SOURCE_DOCLING_JSON_NAME,
+    SOURCE_IMAGES_NAME,
+]
+PREFERRED_AGENT_ARTIFACT = SOURCE_MARKDOWN_NAME
+AUTHORITATIVE_ARTIFACT = SOURCE_DOCLING_JSON_NAME
 MIN_AGENT_TEXT_CHARACTERS = 120
 MIN_AGENT_PAGE_TEXT_CHARACTERS = 40
 MAX_OCR_NOISE_RATIO = 0.25
@@ -615,6 +622,14 @@ def _serialize_page_quality(
     }
 
 
+def _apply_artifact_authority(manifest: dict[str, Any]) -> dict[str, Any]:
+    normalized_manifest = deepcopy(manifest)
+    normalized_manifest["preferred_agent_artifact"] = PREFERRED_AGENT_ARTIFACT
+    normalized_manifest["authoritative_artifact"] = AUTHORITATIVE_ARTIFACT
+    normalized_manifest["available_artifacts"] = list(AVAILABLE_ARTIFACTS)
+    return normalized_manifest
+
+
 def _build_attempt_manifest(
     pdf_path: Path,
     *,
@@ -648,7 +663,7 @@ def _build_attempt_manifest(
         manifest["ocr"] = ocr_metadata
     if remediated_pages:
         manifest["remediated_pages"] = remediated_pages
-    return manifest
+    return _apply_artifact_authority(manifest)
 
 
 def _build_ocr_metadata(
@@ -846,7 +861,7 @@ def _pick_better_attempt(
 
 
 def _finalize_selected_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
-    finalized = deepcopy(manifest)
+    finalized = _apply_artifact_authority(manifest)
     quality = finalized["quality"]
 
     if finalized.get("attempt") != "primary" and quality.get("agent_ready"):
@@ -1156,7 +1171,7 @@ def convert_document_to_ingestion_outputs(
 
     manifest = {
         **_finalize_selected_manifest(selected_attempt.manifest),
-        "attempts": attempts,
+        "attempts": [_apply_artifact_authority(attempt) for attempt in attempts],
         "selected_attempt": selected_attempt.manifest["attempt"],
         "ocr_remediation_applied": len(attempts) > 1,
     }
