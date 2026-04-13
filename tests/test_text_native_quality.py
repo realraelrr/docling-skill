@@ -85,6 +85,42 @@ def test_text_native_quality_keeps_clean_list_only_markdown_good():
     assert quality["reasons"] == []
 
 
+def test_text_native_quality_rejects_punctuation_only_list_item():
+    quality = _assess_text_native_quality(
+        markdown_text="# Title\n\n- --\n",
+        pictures=[],
+        input_type="md",
+    )
+
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert "low_text_content" in quality["reasons"] or "missing_body_structure" in quality["reasons"]
+
+
+def test_text_native_quality_rejects_numeric_only_bullet_item():
+    quality = _assess_text_native_quality(
+        markdown_text="# Title\n\n- 1.\n",
+        pictures=[],
+        input_type="md",
+    )
+
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert "low_text_content" in quality["reasons"] or "missing_body_structure" in quality["reasons"]
+
+
+def test_text_native_quality_rejects_numeric_only_ordered_list_item():
+    quality = _assess_text_native_quality(
+        markdown_text="# Shopping\n\n1. 123\n",
+        pictures=[],
+        input_type="md",
+    )
+
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert "low_text_content" in quality["reasons"] or "missing_body_structure" in quality["reasons"]
+
+
 def test_text_native_quality_rejects_heading_and_overly_thin_body():
     quality = _assess_text_native_quality(
         markdown_text="# Note\n\nA\n",

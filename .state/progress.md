@@ -42,3 +42,9 @@
 - Verified GREEN with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_text_native_quality.py -q` -> `14 passed in 2.54s`
 - Re-ran the required targeted verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_quality_contract.py tests/test_text_native_quality.py tests/test_format_routing.py -q` -> `37 passed in 2.62s`
 - Re-ran full verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest -q` -> `45 passed in 2.68s`
+- Added Priority 3 follow-up regressions for filler-only list bodies so `# Title / - --`, `# Title / - 1.`, and `# Shopping / 1. 123` fail instead of counting as valid preserved lists
+- Tightened list survival to require lexical content after stripping the list marker, keeping real list items green while rejecting punctuation-only and numeric-only filler entries
+- Verified RED with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_text_native_quality.py -q` -> `3 failed, 14 passed in 2.54s`
+- Verified GREEN with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_text_native_quality.py -q` -> `17 passed in 2.56s`
+- Re-ran the required targeted verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_quality_contract.py tests/test_text_native_quality.py tests/test_format_routing.py -q` -> `40 passed in 2.62s`
+- Re-ran full verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest -q` -> `48 passed in 2.66s`

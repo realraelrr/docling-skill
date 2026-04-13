@@ -407,6 +407,10 @@ def _count_lexical_tokens(lines: list[str]) -> int:
     )
 
 
+def _strip_list_marker(line: str) -> str:
+    return re.sub(r"^([-*+]\s+|\d+\.\s+)", "", line).strip()
+
+
 def _compute_text_native_structure_signals(
     markdown_text: str,
     *,
@@ -421,12 +425,16 @@ def _compute_text_native_structure_signals(
     ]
     body_characters = sum(_compact_character_count(line) for line in body_lines)
     body_lexical_token_count = _count_lexical_tokens(body_lines)
+    list_lexical_token_count = _count_lexical_tokens(
+        [_strip_list_marker(line) for line in list_lines]
+    )
 
     return {
         "has_heading": bool(heading_lines),
         "has_list_markers": bool(list_lines),
         "heading_count": len(heading_lines),
         "list_item_count": len(list_lines),
+        "list_lexical_token_count": list_lexical_token_count,
         "body_line_count": len(body_lines),
         "body_characters": body_characters,
         "body_lexical_token_count": body_lexical_token_count,
@@ -439,7 +447,7 @@ def _compute_text_native_structure_signals(
                 and body_lexical_token_count >= 1
             )
         ),
-        "list_survival": len(list_lines) >= 1,
+        "list_survival": list_lexical_token_count >= 1,
     }
 
 
