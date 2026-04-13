@@ -398,6 +398,15 @@ def _min_concise_structured_body_characters(input_type: str) -> int:
     return 2
 
 
+def _count_lexical_tokens(lines: list[str]) -> int:
+    return sum(
+        1
+        for line in lines
+        for token in TOKEN_PATTERN.findall(line)
+        if any(character.isalpha() for character in token)
+    )
+
+
 def _compute_text_native_structure_signals(
     markdown_text: str,
     *,
@@ -411,6 +420,7 @@ def _compute_text_native_structure_signals(
         line for line in content_lines if line not in heading_lines and line not in list_lines
     ]
     body_characters = sum(_compact_character_count(line) for line in body_lines)
+    body_lexical_token_count = _count_lexical_tokens(body_lines)
 
     return {
         "has_heading": bool(heading_lines),
@@ -419,12 +429,14 @@ def _compute_text_native_structure_signals(
         "list_item_count": len(list_lines),
         "body_line_count": len(body_lines),
         "body_characters": body_characters,
+        "body_lexical_token_count": body_lexical_token_count,
         "paragraph_survival": bool(body_lines)
         and (
             body_characters >= _min_text_native_body_characters(input_type)
             or (
                 bool(heading_lines)
                 and body_characters >= _min_concise_structured_body_characters(input_type)
+                and body_lexical_token_count >= 1
             )
         ),
         "list_survival": len(list_lines) >= 1,

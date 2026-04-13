@@ -36,3 +36,9 @@
 - Verified GREEN with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_text_native_quality.py -q` -> `12 passed in 2.55s`
 - Re-ran the required targeted verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_quality_contract.py tests/test_text_native_quality.py tests/test_format_routing.py -q` -> `35 passed in 2.66s`
 - Re-ran full verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest -q` -> `43 passed in 2.79s`
+- Added Priority 3 follow-up regressions for punctuation and numeric filler bodies so `# AB / --` and `# Title / 1.` fail instead of passing through the concise structured-text path
+- Tightened the concise heading-plus-body fallback to require at least one lexical body token, keeping short real text like `Done` and `摘要` valid while rejecting symbol-only or numeric filler
+- Verified RED with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_text_native_quality.py -q` -> `2 failed, 12 passed in 2.54s`
+- Verified GREEN with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_text_native_quality.py -q` -> `14 passed in 2.54s`
+- Re-ran the required targeted verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_quality_contract.py tests/test_text_native_quality.py tests/test_format_routing.py -q` -> `37 passed in 2.62s`
+- Re-ran full verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest -q` -> `45 passed in 2.68s`

@@ -97,6 +97,30 @@ def test_text_native_quality_rejects_heading_and_overly_thin_body():
     assert "low_text_content" in quality["reasons"] or "missing_body_structure" in quality["reasons"]
 
 
+def test_text_native_quality_rejects_heading_and_punctuation_filler_body():
+    quality = _assess_text_native_quality(
+        markdown_text="# AB\n\n--\n",
+        pictures=[],
+        input_type="md",
+    )
+
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert "low_text_content" in quality["reasons"] or "missing_body_structure" in quality["reasons"]
+
+
+def test_text_native_quality_rejects_heading_and_numeric_filler_body():
+    quality = _assess_text_native_quality(
+        markdown_text="# Title\n\n1.\n",
+        pictures=[],
+        input_type="md",
+    )
+
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert "low_text_content" in quality["reasons"] or "missing_body_structure" in quality["reasons"]
+
+
 def test_text_native_quality_rejects_near_empty_text_native_output():
     quality = _assess_text_native_quality(
         markdown_text="OK",
