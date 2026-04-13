@@ -10,6 +10,7 @@ Supported local inputs:
 
 Outputs:
 - source.md: Markdown with stable image placeholders like [[image:picture-p2-0]]
+- source.docling.json: Structured Docling document export from the same conversion result
 - source.images.json: Image sidecars when extraction is available for the input
 - source.manifest.json: Quality and routing metadata for downstream consumers
 - source.meta.json: Lightweight ingestion metadata for downstream agents
@@ -80,7 +81,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "output_dir",
         nargs="?",
         default="/tmp/docling-output",
-        help="Optional directory for source.md, source.images.json, source.manifest.json, and source.meta.json.",
+        help="Optional directory for source.md, source.docling.json, source.images.json, source.manifest.json, and source.meta.json.",
     )
     parser.add_argument(
         "--ocr-engine",
@@ -123,6 +124,7 @@ def _print_conversion_summary(input_path: Path, outputs: dict[str, Any]) -> None
     )
     print(
         "Sidecars: "
+        f"{outputs['docling_json_path'].name}, "
         f"{outputs['images_path'].name}, "
         f"{outputs['manifest_path'].name}, "
         f"{outputs['meta_path'].name}"

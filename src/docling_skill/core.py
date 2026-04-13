@@ -31,6 +31,7 @@ IMAGE_TOKEN_PATTERN = re.compile(r"\[\[image:[^\]]+\]\]")
 MARKDOWN_PREFIX_PATTERN = re.compile(r"^(#{1,6}\s+|[-*+]\s+|\d+\.\s+)")
 TOKEN_PATTERN = re.compile(r"[^\s]+")
 SOURCE_MARKDOWN_NAME = "source.md"
+SOURCE_DOCLING_JSON_NAME = "source.docling.json"
 SOURCE_IMAGES_NAME = "source.images.json"
 SOURCE_MANIFEST_NAME = "source.manifest.json"
 SOURCE_META_NAME = "source.meta.json"
@@ -89,6 +90,7 @@ class AttemptArtifacts:
     markdown_text: str
     images: list[ImageSidecar]
     page_outputs: dict[int, PageArtifacts]
+    structured_document: dict[str, Any]
     manifest: dict[str, Any]
 
 
@@ -549,6 +551,22 @@ def _collect_page_outputs(
     }
 
 
+def _export_structured_document(document: Any) -> dict[str, Any]:
+    export_to_dict = getattr(document, "export_to_dict", None)
+    if callable(export_to_dict):
+        return export_to_dict()
+
+    model_dump = getattr(document, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(mode="json")
+
+    dict_method = getattr(document, "dict", None)
+    if callable(dict_method):
+        return dict_method()
+
+    raise TypeError("Docling document does not expose a supported structured export method")
+
+
 def _export_page_markdown(result: Any) -> dict[int, str]:
     doc = docling_document_to_legacy(result.document)
     if doc.main_text is None:
@@ -656,6 +674,7 @@ def _assemble_attempt_from_pages(
     pdf_path: Path,
     *,
     page_outputs: dict[int, PageArtifacts],
+    structured_document: dict[str, Any],
     attempt_label: str,
     status: str,
     ocr_metadata: dict[str, Any],
@@ -695,6 +714,7 @@ def _assemble_attempt_from_pages(
         markdown_text=markdown_text,
         images=images,
         page_outputs=page_outputs,
+        structured_document=deepcopy(structured_document),
         manifest=manifest,
     )
 
@@ -765,6 +785,7 @@ def _merge_page_attempts(
     return _assemble_attempt_from_pages(
         Path(primary_attempt.manifest["source_file"]),
         page_outputs=merged_page_outputs,
+        structured_document=primary_attempt.structured_document,
         attempt_label="page_ocr_remediation",
         status=primary_attempt.manifest["status"],
         ocr_metadata=merged_ocr,
@@ -909,6 +930,7 @@ def _convert_single_attempt(
     pictures = _collect_picture_sidecars(result.document)
     markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
     markdown_text = _inject_picture_placeholders(markdown_text, pictures)
+    structured_document = _export_structured_document(result.document)
     page_outputs = _collect_page_outputs(result, pictures, markdown_text)
     quality = _assess_agent_quality(
         markdown_text=markdown_text,
@@ -937,6 +959,7 @@ def _convert_single_attempt(
         markdown_text=markdown_text,
         images=pictures,
         page_outputs=page_outputs,
+        structured_document=structured_document,
         manifest=manifest,
     )
 
@@ -1002,6 +1025,7 @@ def _convert_text_native_input(
     pictures = _collect_picture_sidecars(result.document)
     markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
     markdown_text = _inject_picture_placeholders(markdown_text, pictures)
+    structured_document = _export_structured_document(result.document)
     quality = _assess_text_native_quality(
         markdown_text=markdown_text,
         pictures=pictures,
@@ -1023,6 +1047,7 @@ def _convert_text_native_input(
         markdown_text=markdown_text,
         images=pictures,
         page_outputs={},
+        structured_document=structured_document,
         manifest=manifest,
     )
     return attempt, [attempt.manifest]
@@ -1079,11 +1104,16 @@ def convert_document_to_ingestion_outputs(
     )
 
     markdown_path = output_dir / SOURCE_MARKDOWN_NAME
+    docling_json_path = output_dir / SOURCE_DOCLING_JSON_NAME
     images_path = output_dir / SOURCE_IMAGES_NAME
     manifest_path = output_dir / SOURCE_MANIFEST_NAME
     meta_path = output_dir / SOURCE_META_NAME
 
     markdown_path.write_text(selected_attempt.markdown_text, encoding="utf-8")
+    docling_json_path.write_text(
+        json.dumps(selected_attempt.structured_document, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     images_path.write_text(
         json.dumps(selected_attempt.images, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -1112,10 +1142,12 @@ def convert_document_to_ingestion_outputs(
 
     return {
         "markdown_path": markdown_path,
+        "docling_json_path": docling_json_path,
         "images_path": images_path,
         "manifest_path": manifest_path,
         "meta_path": meta_path,
         "markdown_text": selected_attempt.markdown_text,
+        "docling_document": selected_attempt.structured_document,
         "images": selected_attempt.images,
         "manifest": manifest,
         "meta": meta,

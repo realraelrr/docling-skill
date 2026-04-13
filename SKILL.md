@@ -7,7 +7,7 @@ description: Use when converting documents with docling-skill into workflow-read
 
 ## When to use
 - A document needs to be converted for agent consumption rather than ad hoc text extraction.
-- The caller needs Markdown plus image sidecars and a quality manifest.
+- The caller needs Markdown, structured Docling JSON, image sidecars, and a quality manifest.
 - The source may be scanned, image-heavy, or likely to require OCR remediation, especially for PDF.
 - The user asks for document conversion, PDF extraction, PDF-to-Markdown, PDF analysis, or knowledge-base ingestion from a document.
 
@@ -42,6 +42,7 @@ Optional flags:
 ## Outputs
 The extractor writes:
 - `source.md`
+- `source.docling.json`
 - `source.images.json`
 - `source.manifest.json`
 - `source.meta.json`
@@ -53,6 +54,10 @@ The extractor writes:
 `source.images.json`
 - One entry per extracted picture when image extraction is available for that input.
 - Includes `id`, `placeholder`, `page_no`, `bbox`, `mime_type`, and `base64`.
+
+`source.docling.json`
+- Structured Docling document export from the same conversion result as `source.md`.
+- Use this when a downstream consumer needs machine-readable document structure.
 
 `source.manifest.json`
 - Includes `quality` (with nested `content_trust`), `selected_attempt`, and `ocr_remediation_applied`.
@@ -70,7 +75,7 @@ The extractor writes:
 - It does not emit knowledge-base semantic fields.
 - It currently accepts local `pdf`, `docx`, `html`, `txt`, and `md` inputs.
 - It does not fetch remote URLs. Remote acquisition belongs to the fetcher/browser layer upstream.
-- This workflow phase emits `source.md`, `source.images.json`, `source.manifest.json`, and `source.meta.json`. There is no `source.docling.json` artifact in this phase.
+- This workflow phase emits `source.md`, `source.docling.json`, `source.images.json`, `source.manifest.json`, and `source.meta.json`.
 
 ## First Check
 Read `source.manifest.json` before consuming `source.md`.
@@ -142,7 +147,7 @@ conda run -n docling python -m docling_skill.cli \
 
 ## Success Signal
 - The command exits with code `0`.
-- The output directory contains `source.md`, `source.images.json`, `source.manifest.json`, and `source.meta.json`.
+- The output directory contains `source.md`, `source.docling.json`, `source.images.json`, `source.manifest.json`, and `source.meta.json`.
 - `source.manifest.json` has been checked explicitly before using `source.md`.
 
 ## Roadmap Note

@@ -7,6 +7,7 @@
 It turns a local document artifact into workflow-ready artifacts that LLM agents can consume directly:
 
 - `source.md`: agent-readable markdown
+- `source.docling.json`: structured Docling document export from the same conversion result as `source.md`
 - `source.images.json`: image sidecars with stable placeholders and base64 payloads when extraction is available
 - `source.manifest.json`: quality, remediation, and routing metadata
 - `source.meta.json`: lightweight ingestion metadata for downstream agents
@@ -86,6 +87,7 @@ Typical output:
 Only after that should an agent consume:
 
 - `/tmp/docling-sidecar/source.md`
+- `/tmp/docling-sidecar/source.docling.json`
 - `/tmp/docling-sidecar/source.images.json`
 - `/tmp/docling-sidecar/source.meta.json`
 
@@ -127,6 +129,7 @@ if manifest["quality"]["status"] != "good":
     raise RuntimeError(manifest["quality"])
 
 markdown_text = outputs["markdown_text"]
+docling_document = outputs["docling_document"]
 images = outputs["images"]
 meta = outputs["meta"]
 ```
@@ -136,14 +139,14 @@ meta = outputs["meta"]
 The CLI writes:
 
 - `source.md`
+- `source.docling.json`
 - `source.images.json`
 - `source.manifest.json`
 - `source.meta.json`
 
 `source.manifest.json` is the control plane for downstream agents.
+`source.docling.json` is the structured sidecar for consumers that need machine-readable document structure.
 `source.meta.json` is the bridge metadata for downstream agents and orchestrators.
-
-The current workflow contract is scoped to these output files only. There is no separate `source.docling.json` artifact in this phase.
 
 Important fields:
 

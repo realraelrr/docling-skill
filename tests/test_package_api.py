@@ -10,6 +10,10 @@ def _fake_attempt(input_path: Path) -> core.AttemptArtifacts:
         markdown_text="# Title\n\nBody text for ingestion.\n",
         images=[],
         page_outputs={},
+        structured_document={
+            "schema_name": "DoclingDocument",
+            "name": input_path.name,
+        },
         manifest={
             "source_file": str(input_path),
             "attempt": "primary",
@@ -45,6 +49,11 @@ def _fake_pdf_attempt(
         markdown_text=markdown_text,
         images=[],
         page_outputs={},
+        structured_document={
+            "schema_name": "DoclingDocument",
+            "attempt": attempt,
+            "name": input_path.name,
+        },
         manifest={
             "source_file": str(input_path),
             "input_type": "pdf",
@@ -127,8 +136,13 @@ def test_output_contract_uses_source_sidecars(tmp_path, monkeypatch):
 
     assert outputs["markdown_path"].name == "source.md"
     assert outputs["images_path"].name == "source.images.json"
+    assert outputs["docling_json_path"].name == "source.docling.json"
     assert outputs["manifest_path"].name == "source.manifest.json"
     assert outputs["meta_path"].name == "source.meta.json"
+    assert outputs["docling_document"] == {
+        "schema_name": "DoclingDocument",
+        "name": input_path.name,
+    }
 
     manifest = json.loads(outputs["manifest_path"].read_text(encoding="utf-8"))
     assert manifest["document_markdown"] == "source.md"
@@ -139,6 +153,9 @@ def test_output_contract_uses_source_sidecars(tmp_path, monkeypatch):
     meta = json.loads(outputs["meta_path"].read_text(encoding="utf-8"))
     assert meta["input_type"] == "pdf"
     assert meta["pipeline_family"] == "standard_pdf"
+
+    docling_json = json.loads(outputs["docling_json_path"].read_text(encoding="utf-8"))
+    assert docling_json == outputs["docling_document"]
 
 
 def test_pdf_remediation_selection_preserves_salvaged_manifest(tmp_path, monkeypatch):
@@ -186,6 +203,7 @@ def test_pdf_remediation_selection_preserves_salvaged_manifest(tmp_path, monkeyp
 
     manifest = outputs["manifest"]
     assert outputs["markdown_text"] == remediated_attempt.markdown_text
+    assert outputs["docling_document"] == remediated_attempt.structured_document
     assert manifest["selected_attempt"] == "page_ocr_remediation"
     assert manifest["ocr_remediation_applied"] is True
     assert len(manifest["attempts"]) == 2

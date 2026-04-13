@@ -6,8 +6,28 @@ from docling_skill.core import (
     _compute_line_structure_signal,
     _compute_ocr_noise_ratio,
     _compute_table_fragment_signal,
+    _export_structured_document,
     build_source_meta,
 )
+
+
+def test_export_structured_document_prefers_export_to_dict():
+    class FakeDocument:
+        def export_to_dict(self) -> dict[str, object]:
+            return {
+                "schema_name": "DoclingDocument",
+                "body": "structured payload",
+            }
+
+        def model_dump(self) -> dict[str, object]:
+            raise AssertionError("export_to_dict should be preferred when available")
+
+    structured = _export_structured_document(FakeDocument())
+
+    assert structured == {
+        "schema_name": "DoclingDocument",
+        "body": "structured payload",
+    }
 
 
 def test_compute_ocr_noise_ratio_detects_gibberish_tokens():

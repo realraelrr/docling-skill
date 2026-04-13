@@ -7,6 +7,7 @@
 它会把本地文档产物转成 workflow-ready 的标准产物：
 
 - `source.md`：面向 Agent 的 Markdown 正文
+- `source.docling.json`：与 `source.md` 来自同一次转换结果的结构化 Docling 文档导出
 - `source.images.json`：在支持提图时输出、带稳定占位符和 base64 的图片 sidecar
 - `source.manifest.json`：质量、补救路径和路由决策元数据
 - `source.meta.json`：供下游 agent 和 workflow 主控读取的轻量 ingestion 元数据
@@ -86,6 +87,7 @@ python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.
 只有在这一步之后，Agent 才应该继续消费：
 
 - `/tmp/docling-sidecar/source.md`
+- `/tmp/docling-sidecar/source.docling.json`
 - `/tmp/docling-sidecar/source.images.json`
 - `/tmp/docling-sidecar/source.meta.json`
 
@@ -127,6 +129,7 @@ if manifest["quality"]["status"] != "good":
     raise RuntimeError(manifest["quality"])
 
 markdown_text = outputs["markdown_text"]
+docling_document = outputs["docling_document"]
 images = outputs["images"]
 meta = outputs["meta"]
 ```
@@ -136,13 +139,12 @@ meta = outputs["meta"]
 CLI 会写出：
 
 - `source.md`
+- `source.docling.json`
 - `source.images.json`
 - `source.manifest.json`
 - `source.meta.json`
 
-其中 `source.manifest.json` 是下游 Agent 的控制平面，`source.meta.json` 是下游 workflow 的桥接元数据。
-
-当前阶段的 workflow 契约只包含这些输出文件；这一阶段没有单独的 `source.docling.json` 产物。
+其中 `source.manifest.json` 是下游 Agent 的控制平面，`source.docling.json` 是给需要结构化机器读取的消费者使用的 sidecar，`source.meta.json` 是下游 workflow 的桥接元数据。
 
 重点字段：
 

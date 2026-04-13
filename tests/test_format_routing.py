@@ -12,6 +12,11 @@ def _fake_attempt(input_path: Path, *, input_type: str, pipeline_family: str) ->
         markdown_text="# Title\n\nBody text for ingestion.\n",
         images=[],
         page_outputs={},
+        structured_document={
+            "schema_name": "DoclingDocument",
+            "name": input_path.name,
+            "input_type": input_type,
+        },
         manifest={
             "source_file": str(input_path),
             "attempt": "primary",
@@ -41,11 +46,13 @@ def _assert_source_sidecar_contract(
 ):
     markdown_path = outputs["markdown_path"]
     images_path = outputs["images_path"]
+    docling_json_path = outputs["docling_json_path"]
     manifest_path = outputs["manifest_path"]
     meta_path = outputs["meta_path"]
 
     assert markdown_path.name == "source.md"
     assert images_path.name == "source.images.json"
+    assert docling_json_path.name == "source.docling.json"
     assert manifest_path.name == "source.manifest.json"
     assert meta_path.name == "source.meta.json"
 
@@ -64,6 +71,10 @@ def _assert_source_sidecar_contract(
 
     images = json.loads(images_path.read_text(encoding="utf-8"))
     assert images == []
+
+    docling_document = json.loads(docling_json_path.read_text(encoding="utf-8"))
+    assert docling_document == outputs["docling_document"]
+    assert docling_document["schema_name"] == "DoclingDocument"
 
 
 @pytest.mark.parametrize(
@@ -252,6 +263,12 @@ def test_convert_text_native_txt_uses_string_conversion_path(
         def export_to_markdown(self, image_mode=None) -> str:
             return "# Title\n\nPlain text body.\n"
 
+        def export_to_dict(self) -> dict[str, object]:
+            return {
+                "schema_name": "DoclingDocument",
+                "body": "Plain text body.",
+            }
+
     class FakeResult:
         status = ConversionStatus.SUCCESS
         document = FakeDocument()
@@ -280,4 +297,5 @@ def test_convert_text_native_txt_uses_string_conversion_path(
     assert attempt.manifest["input_type"] == "txt"
     assert attempt.manifest["pipeline_family"] == "simple"
     assert attempt.manifest["quality"]["status"] == "good"
+    assert attempt.structured_document["schema_name"] == "DoclingDocument"
     assert attempts == [attempt.manifest]
