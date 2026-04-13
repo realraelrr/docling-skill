@@ -174,7 +174,7 @@ Status meanings:
 
 For text-native inputs, `good` means the converted Markdown still preserves usable body structure.
 It is not equivalent to "Docling parsed the file" or "the Markdown is merely non-empty."
-For `docx`, `html`, and `md`, the quality gate expects surviving paragraph/body structure.
+For `docx`, `html`, and `md`, the quality gate accepts surviving paragraph/body structure, including concise body text, or preserved list structure where that is the real content.
 For `txt`, the gate stays looser because plain text often has less explicit structure.
 
 `source.meta.json` intentionally stays limited to ingestion metadata:

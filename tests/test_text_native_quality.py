@@ -25,6 +25,30 @@ def test_text_native_quality_keeps_html_heading_and_paragraph_output_good():
     assert quality["reasons"] == []
 
 
+def test_text_native_quality_keeps_concise_heading_and_short_body_good():
+    quality = _assess_text_native_quality(
+        markdown_text="# Note\n\nSummary\n",
+        pictures=[],
+        input_type="md",
+    )
+
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["reasons"] == []
+
+
+def test_text_native_quality_keeps_concise_heading_and_single_item_list_good():
+    quality = _assess_text_native_quality(
+        markdown_text="# Todo\n\n- Buy milk\n",
+        pictures=[],
+        input_type="md",
+    )
+
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["reasons"] == []
+
+
 def test_text_native_quality_keeps_clean_list_only_markdown_good():
     quality = _assess_text_native_quality(
         markdown_text="# Shopping List\n\n- Eggs\n- Milk\n- Bread\n",

@@ -110,8 +110,8 @@ python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.
    - `good`: use `source.md` as the primary text artifact.
    - `salvaged`: use `source.md`, but treat it as OCR-remediated and lower confidence.
    - `failed_for_agent`: do not present it as clean ingestion; report the failure and the manifest reasons.
-   - For text-native inputs, `good` means usable body structure survived in Markdown; it is not just "the parse succeeded" or "the Markdown is non-empty."
-   - For `docx`, `html`, and `md`, expect heading/body or paragraph survival; `txt` stays looser.
+   - For text-native inputs, `good` means usable structure survived in Markdown; it is not just "the parse succeeded" or "the Markdown is non-empty."
+   - For `docx`, `html`, and `md`, accept surviving paragraph/body structure, including concise body text, or preserved list structure when the list is the document's real content; `txt` stays looser.
 5. Treat `manifest["preferred_agent_artifact"]` as the default agent entrypoint. In this contract that is always `source.md`.
 6. Treat `manifest["authoritative_artifact"]` as the recovery/deep-inspection artifact. In this contract that is always `source.docling.json`.
 7. Check `manifest["selected_attempt"]` to see which attempt won. A remediation attempt can still end as `failed_for_agent`.

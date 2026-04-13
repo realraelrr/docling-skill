@@ -329,7 +329,10 @@ def _assess_text_native_quality(
     placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
     text_without_placeholders = _strip_image_tokens(markdown_text)
     non_placeholder_characters = _compact_character_count(text_without_placeholders)
-    structure_signals = _compute_text_native_structure_signals(text_without_placeholders)
+    structure_signals = _compute_text_native_structure_signals(
+        text_without_placeholders,
+        input_type=input_type,
+    )
 
     reasons: list[str] = []
     if non_placeholder_characters < _min_text_native_characters(input_type):
@@ -366,7 +369,17 @@ def _min_text_native_characters(input_type: str) -> int:
     return 8
 
 
-def _compute_text_native_structure_signals(markdown_text: str) -> dict[str, int | bool]:
+def _min_text_native_body_characters(input_type: str) -> int:
+    if input_type == "txt":
+        return 3
+    return 5
+
+
+def _compute_text_native_structure_signals(
+    markdown_text: str,
+    *,
+    input_type: str,
+) -> dict[str, int | bool]:
     raw_lines = [line.rstrip() for line in markdown_text.splitlines()]
     content_lines = [line.strip() for line in raw_lines if line.strip()]
     heading_lines = [line for line in content_lines if re.match(r"^#{1,6}\s+\S", line)]
@@ -383,8 +396,9 @@ def _compute_text_native_structure_signals(markdown_text: str) -> dict[str, int 
         "list_item_count": len(list_lines),
         "body_line_count": len(body_lines),
         "body_characters": body_characters,
-        "paragraph_survival": bool(body_lines) and body_characters >= 8,
-        "list_survival": len(list_lines) >= 2,
+        "paragraph_survival": bool(body_lines)
+        and body_characters >= _min_text_native_body_characters(input_type),
+        "list_survival": len(list_lines) >= 1,
     }
 
 
