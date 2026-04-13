@@ -48,3 +48,9 @@
 - Verified GREEN with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_text_native_quality.py -q` -> `17 passed in 2.56s`
 - Re-ran the required targeted verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_quality_contract.py tests/test_text_native_quality.py tests/test_format_routing.py -q` -> `40 passed in 2.62s`
 - Re-ran full verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest -q` -> `48 passed in 2.66s`
+- Added Priority 3 follow-up regressions for concise heading-plus-list content so `# 标题 / - 摘要` and `# 标题 / 1. 摘要` are accepted under the documented concise structured-text contract
+- Extended the lowered total-text threshold to heading-plus-real-list content by reusing the existing lexical list-content signal, without reopening the filler-list cases
+- Verified RED with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_text_native_quality.py -q` -> `2 failed, 17 passed in 2.59s`
+- Verified GREEN with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_text_native_quality.py -q` -> `19 passed in 2.54s`
+- Re-ran the required targeted verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_quality_contract.py tests/test_text_native_quality.py tests/test_format_routing.py -q` -> `42 passed in 2.73s`
+- Re-ran full verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest -q` -> `50 passed in 2.69s`

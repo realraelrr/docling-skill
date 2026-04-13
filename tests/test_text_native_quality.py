@@ -85,6 +85,30 @@ def test_text_native_quality_keeps_clean_list_only_markdown_good():
     assert quality["reasons"] == []
 
 
+def test_text_native_quality_keeps_concise_heading_and_cjk_bullet_list_good():
+    quality = _assess_text_native_quality(
+        markdown_text="# 标题\n\n- 摘要\n",
+        pictures=[],
+        input_type="md",
+    )
+
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["reasons"] == []
+
+
+def test_text_native_quality_keeps_concise_heading_and_cjk_ordered_list_good():
+    quality = _assess_text_native_quality(
+        markdown_text="# 标题\n\n1. 摘要\n",
+        pictures=[],
+        input_type="md",
+    )
+
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["reasons"] == []
+
+
 def test_text_native_quality_rejects_punctuation_only_list_item():
     quality = _assess_text_native_quality(
         markdown_text="# Title\n\n- --\n",

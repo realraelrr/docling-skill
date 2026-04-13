@@ -380,7 +380,10 @@ def _min_text_native_characters(
     if (
         structure_signals
         and structure_signals["has_heading"]
-        and structure_signals["body_characters"] >= _min_concise_structured_body_characters(input_type)
+        and (
+            structure_signals["body_characters"] >= _min_concise_structured_body_characters(input_type)
+            or structure_signals["list_lexical_token_count"] >= 1
+        )
     ):
         return 5
     return 8
