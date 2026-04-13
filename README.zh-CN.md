@@ -170,6 +170,11 @@ CLI 会写出：
 - `salvaged`：可用，但来自补救路径
 - `failed_for_agent`：不要当成干净的 ingestion 结果使用
 
+对 text-native 输入来说，`good` 的含义是转换后的 Markdown 仍然保留了可用的正文结构。
+它不等于“Docling 解析成功”或“Markdown 不是空字符串”。
+对 `docx`、`html`、`md`，质量门控会要求段落/正文结构仍然存在。
+对 `txt`，规则会更宽松，因为纯文本本来就可能缺少显式结构。
+
 `source.meta.json` 的字段范围固定为 ingestion 阶段可知信息：
 
 - `job_id`

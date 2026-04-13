@@ -83,11 +83,24 @@ def test_assess_text_native_quality_accepts_short_nonempty_markdown():
     quality = _assess_text_native_quality(
         markdown_text="Short paragraph.",
         pictures=[],
+        input_type="md",
     )
 
     assert quality["status"] == "good"
     assert quality["agent_ready"] is True
     assert quality["reasons"] == []
+
+
+def test_assess_text_native_quality_rejects_heading_only_docx_output():
+    quality = _assess_text_native_quality(
+        markdown_text="# Example Title",
+        pictures=[],
+        input_type="docx",
+    )
+
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert "missing_body_structure" in quality["reasons"]
 
 
 def test_build_source_meta_limits_fields_to_ingestion_metadata():

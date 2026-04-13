@@ -172,6 +172,11 @@ Status meanings:
 - `salvaged`: usable, but selected from a remediation path
 - `failed_for_agent`: do not present as clean ingestion
 
+For text-native inputs, `good` means the converted Markdown still preserves usable body structure.
+It is not equivalent to "Docling parsed the file" or "the Markdown is merely non-empty."
+For `docx`, `html`, and `md`, the quality gate expects surviving paragraph/body structure.
+For `txt`, the gate stays looser because plain text often has less explicit structure.
+
 `source.meta.json` intentionally stays limited to ingestion metadata:
 
 - `job_id`

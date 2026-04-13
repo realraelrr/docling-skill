@@ -233,6 +233,7 @@ def test_convert_document_smoke_converts_real_text_native_files(
     )
     assert "Example Title" in outputs["markdown_text"]
     assert expected_snippet in outputs["markdown_text"].lower()
+    assert outputs["manifest"]["quality"]["reasons"] == []
 
 
 def test_convert_document_smoke_converts_real_docx_file(tmp_path: Path):
@@ -256,6 +257,7 @@ def test_convert_document_smoke_converts_real_docx_file(tmp_path: Path):
     )
     assert "Example Title" in outputs["markdown_text"]
     assert "docx body should survive" in outputs["markdown_text"].lower()
+    assert outputs["manifest"]["quality"]["reasons"] == []
 
 
 def test_convert_text_native_txt_uses_string_conversion_path(

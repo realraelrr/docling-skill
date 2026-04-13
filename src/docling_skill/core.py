@@ -324,16 +324,23 @@ def _assess_agent_quality(
 def _assess_text_native_quality(
     markdown_text: str,
     pictures: list[ImageSidecar],
+    input_type: str,
 ) -> dict[str, Any]:
     placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
     text_without_placeholders = _strip_image_tokens(markdown_text)
     non_placeholder_characters = _compact_character_count(text_without_placeholders)
+    structure_signals = _compute_text_native_structure_signals(text_without_placeholders)
 
     reasons: list[str] = []
-    if non_placeholder_characters == 0:
+    if non_placeholder_characters < _min_text_native_characters(input_type):
         reasons.append("low_text_content")
     if placeholder_count > 0 and non_placeholder_characters == 0:
         reasons.append("image_only_output")
+    if (
+        non_placeholder_characters >= _min_text_native_characters(input_type)
+        and not _has_text_native_body_survival(input_type, structure_signals)
+    ):
+        reasons.append("missing_body_structure")
 
     status = "good" if not reasons else "failed_for_agent"
 
@@ -343,7 +350,7 @@ def _assess_text_native_quality(
         "reasons": reasons,
         "placeholder_count": placeholder_count,
         "non_placeholder_characters": non_placeholder_characters,
-        "min_required_text_characters": 1,
+        "min_required_text_characters": _min_text_native_characters(input_type),
         "picture_count": len(pictures),
         "content_trust": _compute_content_trust_signals(text_without_placeholders),
     }
@@ -351,6 +358,47 @@ def _assess_text_native_quality(
 
 def _strip_image_tokens(markdown_text: str) -> str:
     return IMAGE_TOKEN_PATTERN.sub("", markdown_text)
+
+
+def _min_text_native_characters(input_type: str) -> int:
+    if input_type == "txt":
+        return 3
+    return 8
+
+
+def _compute_text_native_structure_signals(markdown_text: str) -> dict[str, int | bool]:
+    raw_lines = [line.rstrip() for line in markdown_text.splitlines()]
+    content_lines = [line.strip() for line in raw_lines if line.strip()]
+    heading_lines = [line for line in content_lines if re.match(r"^#{1,6}\s+\S", line)]
+    list_lines = [line for line in content_lines if re.match(r"^([-*+]\s+|\d+\.\s+)", line)]
+    body_lines = [
+        line for line in content_lines if line not in heading_lines and line not in list_lines
+    ]
+    body_characters = sum(_compact_character_count(line) for line in body_lines)
+
+    return {
+        "has_heading": bool(heading_lines),
+        "has_list_markers": bool(list_lines),
+        "heading_count": len(heading_lines),
+        "list_item_count": len(list_lines),
+        "body_line_count": len(body_lines),
+        "body_characters": body_characters,
+        "paragraph_survival": bool(body_lines) and body_characters >= 8,
+        "list_survival": len(list_lines) >= 2,
+    }
+
+
+def _has_text_native_body_survival(
+    input_type: str,
+    structure_signals: dict[str, int | bool],
+) -> bool:
+    if input_type == "txt":
+        return bool(
+            structure_signals["paragraph_survival"]
+            or structure_signals["body_characters"] >= 3
+        )
+
+    return bool(structure_signals["paragraph_survival"])
 
 
 def _normalize_analysis_line(line: str) -> str:
@@ -1079,6 +1127,7 @@ def _convert_text_native_input(
     quality = _assess_text_native_quality(
         markdown_text=markdown_text,
         pictures=pictures,
+        input_type=input_type,
     )
     manifest = _build_attempt_manifest(
         input_path,
