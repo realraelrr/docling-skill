@@ -1,4 +1,4 @@
-"""Core extraction logic for agent-friendly PDF sidecar outputs."""
+"""Core extraction logic for agent-friendly local document ingestion outputs."""
 
 from __future__ import annotations
 
@@ -30,6 +30,10 @@ IMAGE_PLACEHOLDER = "<!-- image -->"
 IMAGE_TOKEN_PATTERN = re.compile(r"\[\[image:[^\]]+\]\]")
 MARKDOWN_PREFIX_PATTERN = re.compile(r"^(#{1,6}\s+|[-*+]\s+|\d+\.\s+)")
 TOKEN_PATTERN = re.compile(r"[^\s]+")
+SOURCE_MARKDOWN_NAME = "source.md"
+SOURCE_IMAGES_NAME = "source.images.json"
+SOURCE_MANIFEST_NAME = "source.manifest.json"
+SOURCE_META_NAME = "source.meta.json"
 MIN_AGENT_TEXT_CHARACTERS = 120
 MIN_AGENT_PAGE_TEXT_CHARACTERS = 40
 MAX_OCR_NOISE_RATIO = 0.25
@@ -41,6 +45,32 @@ OCRMAC_LANGUAGE_ALIASES = {
     "zh-TW": "zh-Hant",
     "zh-HK": "zh-Hant",
     "en": "en-US",
+}
+INPUT_TYPE_BY_SUFFIX = {
+    ".pdf": "pdf",
+    ".docx": "docx",
+    ".pptx": "pptx",
+    ".xlsx": "xlsx",
+    ".html": "html",
+    ".htm": "html",
+    ".txt": "txt",
+    ".md": "md",
+    ".tex": "latex",
+    ".vtt": "webvtt",
+    ".wav": "wav",
+    ".mp3": "mp3",
+    ".png": "image",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".gif": "image",
+    ".webp": "image",
+}
+TEXT_NATIVE_INPUT_TYPES = {"docx", "html", "txt", "md"}
+TEXT_NATIVE_INPUT_FORMATS = {
+    "docx": InputFormat.DOCX,
+    "html": InputFormat.HTML,
+    "txt": InputFormat.MD,
+    "md": InputFormat.MD,
 }
 
 ImageSidecar = dict[str, Any]
@@ -64,6 +94,48 @@ class AttemptArtifacts:
 
 def _compact_character_count(text: str) -> int:
     return len(re.sub(r"\s+", "", text))
+
+
+def detect_input_type(input_path: Path) -> str:
+    return INPUT_TYPE_BY_SUFFIX.get(input_path.suffix.lower(), "document")
+
+
+def infer_source_title(markdown_text: str, input_path: Path) -> str:
+    for raw_line in markdown_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            return re.sub(r"^#+\s*", "", line).strip() or input_path.stem
+        return line
+    return input_path.stem
+
+
+def build_source_meta(
+    *,
+    input_path: Path | str,
+    manifest: dict[str, Any],
+    markdown_text: str,
+    job_id: str | None = None,
+    source_title: str | None = None,
+) -> dict[str, Any]:
+    normalized_input_path = Path(input_path)
+    quality = manifest["quality"]
+
+    return {
+        "job_id": job_id,
+        "input_type": manifest.get("input_type", detect_input_type(normalized_input_path)),
+        "source_title": source_title or infer_source_title(markdown_text, normalized_input_path),
+        "source_url": None,
+        "source_attachment": normalized_input_path.name,
+        "author": None,
+        "published_at": None,
+        "extractor": "docling",
+        "pipeline_family": manifest.get("pipeline_family"),
+        "quality_status": quality["status"],
+        "quality_reasons": quality["reasons"],
+        "char_count": len(markdown_text),
+    }
 
 
 def _picture_id(page_no: int | None, index: int) -> str:
@@ -235,6 +307,34 @@ def _assess_agent_quality(
         "min_required_text_characters": required_text,
         "picture_count": len(pictures),
         "content_trust": content_trust,
+    }
+
+
+def _assess_text_native_quality(
+    markdown_text: str,
+    pictures: list[ImageSidecar],
+) -> dict[str, Any]:
+    placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
+    text_without_placeholders = _strip_image_tokens(markdown_text)
+    non_placeholder_characters = _compact_character_count(text_without_placeholders)
+
+    reasons: list[str] = []
+    if non_placeholder_characters == 0:
+        reasons.append("low_text_content")
+    if placeholder_count > 0 and non_placeholder_characters == 0:
+        reasons.append("image_only_output")
+
+    status = "good" if not reasons else "failed_for_agent"
+
+    return {
+        "status": status,
+        "agent_ready": status == "good",
+        "reasons": reasons,
+        "placeholder_count": placeholder_count,
+        "non_placeholder_characters": non_placeholder_characters,
+        "min_required_text_characters": 1,
+        "picture_count": len(pictures),
+        "content_trust": _compute_content_trust_signals(text_without_placeholders),
     }
 
 
@@ -498,28 +598,34 @@ def _serialize_page_quality(
 def _build_attempt_manifest(
     pdf_path: Path,
     *,
+    input_type: str,
+    pipeline_family: str,
     attempt_label: str,
     status: str,
     images: list[ImageSidecar],
     markdown_text: str,
-    ocr_metadata: dict[str, Any],
+    ocr_metadata: dict[str, Any] | None,
     quality: QualityReport,
     page_outputs: dict[int, PageArtifacts],
+    page_count: int | None = None,
     remediated_pages: list[int] | None = None,
 ) -> dict[str, Any]:
     manifest = {
         "source_file": str(pdf_path),
+        "input_type": input_type,
+        "pipeline_family": pipeline_family,
         "attempt": attempt_label,
         "status": status,
-        "page_count": len(page_outputs),
+        "page_count": page_count if page_count is not None else len(page_outputs),
         "image_count": len(images),
         "text_characters": len(markdown_text),
-        "document_markdown": f"{pdf_path.stem}.md",
-        "images_json": f"{pdf_path.stem}.images.json",
-        "ocr": ocr_metadata,
+        "document_markdown": SOURCE_MARKDOWN_NAME,
+        "images_json": SOURCE_IMAGES_NAME,
         "quality": quality,
         "page_quality": _serialize_page_quality(page_outputs),
     }
+    if ocr_metadata is not None:
+        manifest["ocr"] = ocr_metadata
     if remediated_pages:
         manifest["remediated_pages"] = remediated_pages
     return manifest
@@ -574,6 +680,8 @@ def _assemble_attempt_from_pages(
     )
     manifest = _build_attempt_manifest(
         pdf_path,
+        input_type="pdf",
+        pipeline_family="standard_pdf",
         attempt_label=attempt_label,
         status=status,
         images=images,
@@ -810,6 +918,8 @@ def _convert_single_attempt(
 
     manifest = _build_attempt_manifest(
         pdf_path,
+        input_type="pdf",
+        pipeline_family="standard_pdf",
         attempt_label=attempt_label,
         status=result.status.value,
         images=pictures,
@@ -831,22 +941,18 @@ def _convert_single_attempt(
     )
 
 
-def convert_pdf_to_sidecar_outputs(
-    pdf_path: Path,
-    output_dir: Path,
+def _convert_pdf_input(
+    input_path: Path,
     *,
-    ocr_engine: str = "auto",
-    ocr_languages: list[str] | None = None,
-    force_full_page_ocr: bool = False,
-    ocr_remediation: bool = True,
-) -> dict[str, Any]:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    normalized_languages = _normalize_ocr_languages(ocr_languages or [])
-
+    ocr_engine: str,
+    ocr_languages: list[str],
+    force_full_page_ocr: bool,
+    ocr_remediation: bool,
+) -> tuple[AttemptArtifacts, list[dict[str, Any]]]:
     primary_attempt = _convert_single_attempt(
-        pdf_path,
+        input_path,
         ocr_engine=ocr_engine,
-        ocr_languages=normalized_languages,
+        ocr_languages=ocr_languages,
         force_full_page_ocr=force_full_page_ocr,
         attempt_label="primary",
     )
@@ -857,12 +963,12 @@ def convert_pdf_to_sidecar_outputs(
         pages_to_remediate, remediation_plan = _select_remediation_plan(
             primary_attempt=primary_attempt,
             ocr_engine=ocr_engine,
-            ocr_languages=normalized_languages,
+            ocr_languages=ocr_languages,
             force_full_page_ocr=force_full_page_ocr,
         )
         if remediation_plan is not None:
             remediated_attempt = _remediate_pages(
-                pdf_path,
+                input_path,
                 primary_attempt=primary_attempt,
                 remediation_plan=remediation_plan,
                 pages_to_remediate=pages_to_remediate,
@@ -871,9 +977,111 @@ def convert_pdf_to_sidecar_outputs(
                 attempts.append(remediated_attempt.manifest)
                 selected_attempt = _pick_better_attempt(primary_attempt, remediated_attempt)
 
-    markdown_path = output_dir / f"{pdf_path.stem}.md"
-    images_path = output_dir / f"{pdf_path.stem}.images.json"
-    manifest_path = output_dir / f"{pdf_path.stem}.manifest.json"
+    return selected_attempt, attempts
+
+
+def _convert_text_native_input(
+    input_path: Path,
+    *,
+    input_type: str,
+) -> tuple[AttemptArtifacts, list[dict[str, Any]]]:
+    converter = DocumentConverter(
+        allowed_formats=[TEXT_NATIVE_INPUT_FORMATS[input_type]]
+    )
+    if input_type == "txt":
+        result = converter.convert_string(
+            input_path.read_text(encoding="utf-8"),
+            format=InputFormat.MD,
+            name=f"{input_path.stem}.md",
+        )
+    else:
+        result = converter.convert(str(input_path))
+    if result.status not in {ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS}:
+        raise RuntimeError(f"Conversion failed with status: {result.status}")
+
+    pictures = _collect_picture_sidecars(result.document)
+    markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
+    markdown_text = _inject_picture_placeholders(markdown_text, pictures)
+    quality = _assess_text_native_quality(
+        markdown_text=markdown_text,
+        pictures=pictures,
+    )
+    manifest = _build_attempt_manifest(
+        input_path,
+        input_type=input_type,
+        pipeline_family="simple",
+        attempt_label="primary",
+        status=result.status.value,
+        images=pictures,
+        markdown_text=markdown_text,
+        ocr_metadata=None,
+        quality=quality,
+        page_outputs={},
+        page_count=max(len(getattr(result, "pages", [])), 1),
+    )
+    attempt = AttemptArtifacts(
+        markdown_text=markdown_text,
+        images=pictures,
+        page_outputs={},
+        manifest=manifest,
+    )
+    return attempt, [attempt.manifest]
+
+
+def _dispatch_conversion(
+    input_path: Path,
+    *,
+    input_type: str,
+    ocr_engine: str,
+    ocr_languages: list[str],
+    force_full_page_ocr: bool,
+    ocr_remediation: bool,
+) -> tuple[AttemptArtifacts, list[dict[str, Any]]]:
+    if input_type == "pdf":
+        return _convert_pdf_input(
+            input_path,
+            ocr_engine=ocr_engine,
+            ocr_languages=ocr_languages,
+            force_full_page_ocr=force_full_page_ocr,
+            ocr_remediation=ocr_remediation,
+        )
+    if input_type in TEXT_NATIVE_INPUT_TYPES:
+        return _convert_text_native_input(
+            input_path,
+            input_type=input_type,
+        )
+    raise NotImplementedError(
+        f"Unsupported input type for v1 ingestion contract: {input_path.suffix or '<no suffix>'}"
+    )
+
+
+def convert_document_to_ingestion_outputs(
+    input_path: Path,
+    output_dir: Path,
+    *,
+    ocr_engine: str = "auto",
+    ocr_languages: list[str] | None = None,
+    force_full_page_ocr: bool = False,
+    ocr_remediation: bool = True,
+    job_id: str | None = None,
+) -> dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    normalized_languages = _normalize_ocr_languages(ocr_languages or [])
+    input_type = detect_input_type(input_path)
+
+    selected_attempt, attempts = _dispatch_conversion(
+        input_path,
+        input_type=input_type,
+        ocr_engine=ocr_engine,
+        ocr_languages=normalized_languages,
+        force_full_page_ocr=force_full_page_ocr,
+        ocr_remediation=ocr_remediation,
+    )
+
+    markdown_path = output_dir / SOURCE_MARKDOWN_NAME
+    images_path = output_dir / SOURCE_IMAGES_NAME
+    manifest_path = output_dir / SOURCE_MANIFEST_NAME
+    meta_path = output_dir / SOURCE_META_NAME
 
     markdown_path.write_text(selected_attempt.markdown_text, encoding="utf-8")
     images_path.write_text(
@@ -891,12 +1099,45 @@ def convert_pdf_to_sidecar_outputs(
         json.dumps(manifest, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    meta = build_source_meta(
+        input_path=input_path,
+        manifest=manifest,
+        markdown_text=selected_attempt.markdown_text,
+        job_id=job_id,
+    )
+    meta_path.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
     return {
         "markdown_path": markdown_path,
         "images_path": images_path,
         "manifest_path": manifest_path,
+        "meta_path": meta_path,
         "markdown_text": selected_attempt.markdown_text,
         "images": selected_attempt.images,
         "manifest": manifest,
+        "meta": meta,
     }
+
+
+def convert_pdf_to_sidecar_outputs(
+    pdf_path: Path,
+    output_dir: Path,
+    *,
+    ocr_engine: str = "auto",
+    ocr_languages: list[str] | None = None,
+    force_full_page_ocr: bool = False,
+    ocr_remediation: bool = True,
+    job_id: str | None = None,
+) -> dict[str, Any]:
+    return convert_document_to_ingestion_outputs(
+        input_path=pdf_path,
+        output_dir=output_dir,
+        ocr_engine=ocr_engine,
+        ocr_languages=ocr_languages,
+        force_full_page_ocr=force_full_page_ocr,
+        ocr_remediation=ocr_remediation,
+        job_id=job_id,
+    )

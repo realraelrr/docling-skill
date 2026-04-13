@@ -1,16 +1,28 @@
 # docling-skill
 
-`docling-skill` is an agent-first PDF ingestion layer built on top of [Docling](https://github.com/docling-project/docling).
+`docling-skill` is a local, agent-first document normalization and ingestion layer built on top of [Docling](https://github.com/docling-project/docling).
 
 [中文说明](README.zh-CN.md)
 
-It turns a PDF into three artifacts that LLM agents can consume directly:
+It turns a local document artifact into workflow-ready artifacts that LLM agents can consume directly:
 
-- `foo.md`: agent-readable markdown
-- `foo.images.json`: extracted images with stable placeholders and base64 payloads
-- `foo.manifest.json`: quality, remediation, and routing metadata
+- `source.md`: agent-readable markdown
+- `source.images.json`: image sidecars with stable placeholders and base64 payloads when extraction is available
+- `source.manifest.json`: quality, remediation, and routing metadata
+- `source.meta.json`: lightweight ingestion metadata for downstream agents
 
 The key idea is simple: agents should not trust extracted markdown blindly. They should read the manifest first, then decide whether the result is safe to use.
+
+## Workflow Boundary
+
+`docling-skill` is the ingestion layer for a larger workflow. Its contract is intentionally narrow:
+
+- It emits `source.*` ingestion artifacts directly.
+- It currently accepts local `pdf`, `docx`, `html`, `txt`, and `md` inputs.
+- It keeps manifest-first quality gating as the control plane.
+- It does not do chunking. Chunking belongs to the generic normalization stage after ingestion.
+- It does not emit knowledge-base semantic fields such as tags, keywords, category, or one-line summary.
+- It does not fetch remote URLs. Remote acquisition belongs to the fetcher/browser layer upstream.
 
 ## Why This Exists
 
@@ -19,7 +31,7 @@ Docling is strong at document parsing. `docling-skill` adds the agent-facing con
 - manifest-first consumption
 - stable image placeholders like `[[image:picture-p3-0]]`
 - agent-quality gating
-- OCR remediation
+- OCR remediation for PDF workflows
 - page-level remediation for weak pages inside otherwise good documents
 - explicit result taxonomy: `good`, `salvaged`, `failed_for_agent`
 
@@ -49,16 +61,16 @@ pip install -e .
 
 ## Homepage Example
 
-Convert a PDF:
+Convert a local document:
 
 ```bash
-docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
+docling-skill "/path/to/file.docx" "/tmp/docling-sidecar"
 ```
 
 Inspect the manifest before using the markdown:
 
 ```bash
-python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/file.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "reasons": m["quality"]["reasons"], "selected_attempt": m["selected_attempt"]})'
+python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "reasons": m["quality"]["reasons"], "selected_attempt": m["selected_attempt"]})'
 ```
 
 Typical output:
@@ -73,19 +85,20 @@ Typical output:
 
 Only after that should an agent consume:
 
-- `/tmp/docling-sidecar/file.md`
-- `/tmp/docling-sidecar/file.images.json`
+- `/tmp/docling-sidecar/source.md`
+- `/tmp/docling-sidecar/source.images.json`
+- `/tmp/docling-sidecar/source.meta.json`
 
 ## CLI
 
 ```bash
-docling-skill "<input_pdf>" "<output_dir>"
+docling-skill "<input_path>" "<output_dir>"
 ```
 
 Equivalent module entrypoint:
 
 ```bash
-python -m docling_skill.cli "<input_pdf>" "<output_dir>"
+python -m docling_skill.cli "<input_path>" "<output_dir>"
 ```
 
 Optional flags:
@@ -102,10 +115,10 @@ Optional flags:
 ```python
 from pathlib import Path
 
-from docling_skill import convert_pdf_to_sidecar_outputs
+from docling_skill import convert_document_to_ingestion_outputs
 
-outputs = convert_pdf_to_sidecar_outputs(
-    pdf_path=Path("/path/to/file.pdf"),
+outputs = convert_document_to_ingestion_outputs(
+    input_path=Path("/path/to/file.html"),
     output_dir=Path("/tmp/docling-sidecar"),
 )
 
@@ -115,17 +128,22 @@ if manifest["quality"]["status"] != "good":
 
 markdown_text = outputs["markdown_text"]
 images = outputs["images"]
+meta = outputs["meta"]
 ```
 
 ## Output Contract
 
-For `foo.pdf`, the CLI writes:
+The CLI writes:
 
-- `foo.md`
-- `foo.images.json`
-- `foo.manifest.json`
+- `source.md`
+- `source.images.json`
+- `source.manifest.json`
+- `source.meta.json`
 
-`foo.manifest.json` is the control plane for downstream agents.
+`source.manifest.json` is the control plane for downstream agents.
+`source.meta.json` is the bridge metadata for downstream agents and orchestrators.
+
+The current workflow contract is scoped to these output files only. There is no separate `source.docling.json` artifact in this phase.
 
 Important fields:
 
@@ -142,11 +160,34 @@ Status meanings:
 - `salvaged`: usable, but selected from a remediation path
 - `failed_for_agent`: do not present as clean ingestion
 
+`source.meta.json` intentionally stays limited to ingestion metadata:
+
+- `job_id`
+- `input_type`
+- `source_title`
+- `source_url`
+- `source_attachment`
+- `author`
+- `published_at`
+- `extractor`
+- `pipeline_family`
+- `quality_status`
+- `quality_reasons`
+- `char_count`
+
+It does not include downstream knowledge fields such as tags, keywords, category, or summary.
+
 ## Image Sidecars
 
 Markdown includes placeholders such as `[[image:picture-p2-1]]`.
 
-Use that placeholder to resolve the matching entry in `foo.images.json`, then pass the image through your runtime's multimodal input path.
+Image extraction is not universal across all supported formats. Use the placeholder to resolve the matching entry in `source.images.json` when an image sidecar entry is present, then pass the image through your runtime's multimodal input path.
+
+Current image guidance:
+
+- Embedded images in local PDFs are supported.
+- Some other local formats may yield image sidecars when Docling exposes them, but do not assume parity across formats.
+- HTML and webpage image capture should be owned by the fetcher/browser layer in the larger workflow, not by this ingestion step.
 
 Each image record includes:
 
@@ -161,12 +202,18 @@ Each image record includes:
 
 - Markdown should stay text-first and never inline image base64.
 - Agents should make trust decisions from the manifest, not from ad hoc heuristics downstream.
-- OCR remediation should be explicit and inspectable.
+- OCR remediation should be explicit and inspectable when used.
 - Page-level remediation is better than rerunning the whole document when only a few pages are weak.
 
 ## Upstream Boundary
 
 `docling-skill` depends on official `docling`.
+
+The current local workflow contract supports `pdf`, `docx`, `html`, `txt`, and `md`.
+
+OCR flags are mainly relevant for PDF inputs. Text-native formats such as DOCX, HTML, TXT, and Markdown typically do not need the PDF remediation path.
+
+Docling itself supports many more formats. Those broader upstream capabilities remain out of scope for this workflow phase unless they are explicitly added to the local `source.*` contract here.
 
 There is currently one known gap between this package and the `pdf-ingest` working fork:
 

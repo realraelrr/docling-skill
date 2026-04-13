@@ -1,15 +1,15 @@
 ---
 name: docling-skill
-description: Use when converting PDFs with docling-skill into agent-readable sidecar outputs, especially when the caller needs Markdown, image sidecars, OCR remediation, or manifest-based quality checks.
+description: Use when converting documents with docling-skill into workflow-ready sidecar outputs, especially when the caller needs Markdown, image sidecars, OCR remediation, or manifest-based quality checks.
 ---
 
 # docling-skill
 
 ## When to use
-- A PDF needs to be converted for agent consumption rather than ad hoc text extraction.
+- A document needs to be converted for agent consumption rather than ad hoc text extraction.
 - The caller needs Markdown plus image sidecars and a quality manifest.
-- The PDF may be scanned, image-heavy, or likely to require OCR remediation.
-- The user asks for PDF conversion, PDF extraction, PDF-to-Markdown, PDF analysis, or knowledge-base ingestion from a PDF.
+- The source may be scanned, image-heavy, or likely to require OCR remediation, especially for PDF.
+- The user asks for document conversion, PDF extraction, PDF-to-Markdown, PDF analysis, or knowledge-base ingestion from a document.
 
 ## Preconditions
 - If you use the relative command, run from the `docling-skill` repo root.
@@ -17,18 +17,11 @@ description: Use when converting PDFs with docling-skill into agent-readable sid
 - Always provide an explicit output directory unless the user explicitly accepts `/tmp/docling-output`.
 
 ## Canonical Command
-Preferred when already in the repo root:
-
-```bash
-conda run -n docling python -m docling_skill.cli "<input_pdf>" "<output_dir>"
-```
-
-If not already in the repo root:
 
 ```bash
 conda run -n docling python \
   -m docling_skill.cli \
-  "<input_pdf>" \
+  "<input_path>" \
   "<output_dir>"
 ```
 
@@ -42,29 +35,45 @@ Optional flags:
 ```
 
 ## Inputs
-- `input_pdf`: Absolute or repo-relative PDF path.
+- `input_path`: Absolute or repo-relative document path.
+  Supported local inputs: `pdf`, `docx`, `html`, `txt`, `md`.
 - `output_dir`: Directory where outputs should be written.
 
 ## Outputs
-For input `foo.pdf`, the extractor writes:
-- `foo.md`
-- `foo.images.json`
-- `foo.manifest.json`
+The extractor writes:
+- `source.md`
+- `source.images.json`
+- `source.manifest.json`
+- `source.meta.json`
 
-`foo.md`
+`source.md`
 - Main agent-readable text.
 - Images appear as placeholders like `[[image:picture-p3-0]]`.
 
-`foo.images.json`
-- One entry per extracted picture.
+`source.images.json`
+- One entry per extracted picture when image extraction is available for that input.
 - Includes `id`, `placeholder`, `page_no`, `bbox`, `mime_type`, and `base64`.
 
-`foo.manifest.json`
+`source.manifest.json`
 - Includes `quality` (with nested `content_trust`), `selected_attempt`, and `ocr_remediation_applied`.
 - Use this file to decide whether the result is safe to pass downstream.
 
+`source.meta.json`
+- Includes only ingestion metadata: `job_id`, `input_type`, `source_title`, `source_url`, `source_attachment`, `author`, `published_at`, `extractor`, `pipeline_family`, `quality_status`, `quality_reasons`, and `char_count`.
+- Do not put downstream knowledge fields like tags, keywords, category, or summary into this file.
+
+## Workflow Boundary
+
+- `docling-skill` is the ingestion layer, not the full workflow.
+- It emits `source.*` directly instead of `<stem>.*`.
+- It does not do chunking. Chunking belongs to the shared normalize stage after ingestion.
+- It does not emit knowledge-base semantic fields.
+- It currently accepts local `pdf`, `docx`, `html`, `txt`, and `md` inputs.
+- It does not fetch remote URLs. Remote acquisition belongs to the fetcher/browser layer upstream.
+- This workflow phase emits `source.md`, `source.images.json`, `source.manifest.json`, and `source.meta.json`. There is no `source.docling.json` artifact in this phase.
+
 ## First Check
-Read `foo.manifest.json` before consuming `foo.md`.
+Read `source.manifest.json` before consuming `source.md`.
 
 Example:
 
@@ -81,25 +90,30 @@ Minimum fields to inspect:
 Minimal example:
 
 ```bash
-python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/file.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "reasons": m["quality"]["reasons"], "selected_attempt": m["selected_attempt"]})'
+python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "reasons": m["quality"]["reasons"], "selected_attempt": m["selected_attempt"]})'
 ```
 
 ## Decision Flow
-1. Resolve the input PDF path and an explicit output directory.
+1. Resolve the input document path and an explicit output directory.
 2. Run the extractor.
-3. Read `*.manifest.json` before trusting `*.md`.
+3. Read `source.manifest.json` before trusting `source.md`.
 4. Decide from `manifest["quality"]["status"]`:
-   - `good`: use `*.md` as the primary text artifact.
-   - `salvaged`: use `*.md`, but treat it as OCR-remediated and lower confidence.
+   - `good`: use `source.md` as the primary text artifact.
+   - `salvaged`: use `source.md`, but treat it as OCR-remediated and lower confidence.
    - `failed_for_agent`: do not present it as clean ingestion; report the failure and the manifest reasons.
 5. Check `manifest["selected_attempt"]` to see which attempt won. A remediation attempt can still end as `failed_for_agent`.
-6. If image analysis matters, resolve placeholders through `*.images.json`.
+6. If image analysis matters, resolve placeholders through `source.images.json`.
 
 ## Images
 When analysis depends on a specific figure or chart:
 1. Find the placeholder in `.md`, for example `[[image:picture-p2-1]]`.
-2. Look up the matching entry in `*.images.json` by `id` or `placeholder`.
+2. Look up the matching entry in `source.images.json` by `id` or `placeholder`.
 3. Pass the corresponding base64 image through the current runtime's supported multimodal input path.
+
+Image handling notes:
+- Embedded images in local PDFs are supported.
+- Image extraction is not universal across all supported formats.
+- HTML and webpage image capture should be owned by the fetcher/browser layer, not this ingestion step.
 
 Example listing command:
 
@@ -112,11 +126,11 @@ Basic conversion:
 
 ```bash
 conda run -n docling python -m docling_skill.cli \
-  "/path/to/file.pdf" \
+  "/path/to/file.docx" \
   "/tmp/docling-sidecar"
 ```
 
-Chinese OCR with explicit language and output path:
+PDF OCR with explicit language and output path:
 
 ```bash
 conda run -n docling python -m docling_skill.cli \
@@ -128,12 +142,20 @@ conda run -n docling python -m docling_skill.cli \
 
 ## Success Signal
 - The command exits with code `0`.
-- The output directory contains `foo.md`, `foo.images.json`, and `foo.manifest.json`.
-- `foo.manifest.json` has been checked explicitly before using `foo.md`.
+- The output directory contains `source.md`, `source.images.json`, `source.manifest.json`, and `source.meta.json`.
+- `source.manifest.json` has been checked explicitly before using `source.md`.
+
+## Roadmap Note
+
+The current local workflow contract supports `pdf`, `docx`, `html`, `txt`, and `md`.
+
+OCR flags are mainly relevant for PDF inputs. Text-native formats such as DOCX, HTML, TXT, and Markdown typically do not need the PDF remediation path.
+
+Docling itself supports more formats upstream, but those remain out of scope for this workflow phase unless they are explicitly added to the local `source.*` contract here.
 
 ## Common Mistakes
 - Do not skip the manifest check.
 - Do not assume `selected_attempt` or a remediation attempt means the result is usable.
 - Do not treat `failed_for_agent` as clean ingestion; it can still contain a small readable preview.
-- Do not embed image base64 into Markdown manually; this tool already writes `*.images.json`.
+- Do not embed image base64 into Markdown manually; this tool already writes `source.images.json`.
 - Do not rely on the default output directory unless the user explicitly accepted it.

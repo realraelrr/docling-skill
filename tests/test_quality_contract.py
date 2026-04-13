@@ -1,8 +1,12 @@
+import json
+
 from docling_skill.core import (
     _assess_agent_quality,
+    _assess_text_native_quality,
     _compute_line_structure_signal,
     _compute_ocr_noise_ratio,
     _compute_table_fragment_signal,
+    build_source_meta,
 )
 
 
@@ -53,3 +57,47 @@ def test_assess_agent_quality_flags_image_only_output():
     assert quality["status"] == "failed_for_agent"
     assert quality["agent_ready"] is False
     assert "low_text_content" in quality["reasons"]
+
+
+def test_assess_text_native_quality_accepts_short_nonempty_markdown():
+    quality = _assess_text_native_quality(
+        markdown_text="Short paragraph.",
+        pictures=[],
+    )
+
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["reasons"] == []
+
+
+def test_build_source_meta_limits_fields_to_ingestion_metadata():
+    manifest = {
+        "pipeline_family": "simple",
+        "quality": {
+            "status": "salvaged",
+            "reasons": ["ocr_remediation_selected"],
+        }
+    }
+
+    meta = build_source_meta(
+        input_path="book2-comparing.pdf",
+        manifest=manifest,
+        markdown_text="# Title\n\nContent body.\n",
+        job_id="kb-20260411-001",
+        source_title="Claude Code vs Codex Harness 设计哲学 — 殊途同归，还是各表一枝",
+    )
+
+    assert json.loads(json.dumps(meta, ensure_ascii=False)) == {
+        "job_id": "kb-20260411-001",
+        "input_type": "pdf",
+        "source_title": "Claude Code vs Codex Harness 设计哲学 — 殊途同归，还是各表一枝",
+        "source_url": None,
+        "source_attachment": "book2-comparing.pdf",
+        "author": None,
+        "published_at": None,
+        "extractor": "docling",
+        "pipeline_family": "simple",
+        "quality_status": "salvaged",
+        "quality_reasons": ["ocr_remediation_selected"],
+        "char_count": len("# Title\n\nContent body.\n"),
+    }
