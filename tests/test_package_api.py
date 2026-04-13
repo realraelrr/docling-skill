@@ -154,6 +154,30 @@ def test_cli_accepts_input_path_argument():
     assert "input_path" in action_names
 
 
+def test_build_attempt_manifest_sets_artifact_authority_fields():
+    manifest = core._build_attempt_manifest(
+        Path("/tmp/example.pdf"),
+        input_type="pdf",
+        pipeline_family="standard_pdf",
+        attempt_label="primary",
+        status="success",
+        images=[],
+        markdown_text="# Title\n\nBody text for ingestion.\n",
+        ocr_metadata=None,
+        quality=_quality_report(),
+        page_outputs={},
+        page_count=1,
+    )
+
+    assert manifest["preferred_agent_artifact"] == "source.md"
+    assert manifest["authoritative_artifact"] == "source.docling.json"
+    assert manifest["available_artifacts"] == [
+        "source.md",
+        "source.docling.json",
+        "source.images.json",
+    ]
+
+
 def test_output_contract_uses_source_sidecars(tmp_path, monkeypatch):
     input_path = tmp_path / "example.pdf"
     output_dir = tmp_path / "out"

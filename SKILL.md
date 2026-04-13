@@ -93,6 +93,7 @@ Minimum fields to inspect:
 - `manifest["quality"]["content_trust"]`
 - `manifest["preferred_agent_artifact"]`
 - `manifest["authoritative_artifact"]`
+- `manifest["available_artifacts"]`
 - `manifest["selected_attempt"]`
 
 Minimal example:
