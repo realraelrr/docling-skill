@@ -30,3 +30,9 @@
 - Verified GREEN with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_text_native_quality.py -q` -> `9 passed in 3.36s`
 - Re-ran the required targeted verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_quality_contract.py tests/test_text_native_quality.py tests/test_format_routing.py -q` -> `32 passed in 2.66s`
 - Re-ran full verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest -q` -> `40 passed in 2.73s`
+- Added Priority 3 follow-up regressions for concise structured Markdown bodies so `# Note / Done` and `# 标题 / 摘要` are accepted while an overly thin body like `# Note / A` still fails
+- Relaxed the structured text-native thresholds only when heading-plus-body structure survives, lowering the total/body character floor for concise real content without reopening non-empty-only acceptance
+- Verified RED with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_text_native_quality.py -q` -> `2 failed, 10 passed in 3.12s`
+- Verified GREEN with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_text_native_quality.py -q` -> `12 passed in 2.55s`
+- Re-ran the required targeted verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest tests/test_quality_contract.py tests/test_text_native_quality.py tests/test_format_routing.py -q` -> `35 passed in 2.66s`
+- Re-ran full verification with `env PYTHONPATH=/private/tmp/docling-skill-source-docling-json/src conda run -n docling python -m pytest -q` -> `43 passed in 2.79s`

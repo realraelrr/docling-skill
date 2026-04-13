@@ -335,12 +335,16 @@ def _assess_text_native_quality(
     )
 
     reasons: list[str] = []
-    if non_placeholder_characters < _min_text_native_characters(input_type):
+    if non_placeholder_characters < _min_text_native_characters(
+        input_type,
+        structure_signals=structure_signals,
+    ):
         reasons.append("low_text_content")
     if placeholder_count > 0 and non_placeholder_characters == 0:
         reasons.append("image_only_output")
     if (
-        non_placeholder_characters >= _min_text_native_characters(input_type)
+        non_placeholder_characters
+        >= _min_text_native_characters(input_type, structure_signals=structure_signals)
         and not _has_text_native_body_survival(input_type, structure_signals)
     ):
         reasons.append("missing_body_structure")
@@ -353,7 +357,10 @@ def _assess_text_native_quality(
         "reasons": reasons,
         "placeholder_count": placeholder_count,
         "non_placeholder_characters": non_placeholder_characters,
-        "min_required_text_characters": _min_text_native_characters(input_type),
+        "min_required_text_characters": _min_text_native_characters(
+            input_type,
+            structure_signals=structure_signals,
+        ),
         "picture_count": len(pictures),
         "content_trust": _compute_content_trust_signals(text_without_placeholders),
     }
@@ -363,9 +370,19 @@ def _strip_image_tokens(markdown_text: str) -> str:
     return IMAGE_TOKEN_PATTERN.sub("", markdown_text)
 
 
-def _min_text_native_characters(input_type: str) -> int:
+def _min_text_native_characters(
+    input_type: str,
+    *,
+    structure_signals: dict[str, int | bool] | None = None,
+) -> int:
     if input_type == "txt":
         return 3
+    if (
+        structure_signals
+        and structure_signals["has_heading"]
+        and structure_signals["body_characters"] >= _min_concise_structured_body_characters(input_type)
+    ):
+        return 5
     return 8
 
 
@@ -373,6 +390,12 @@ def _min_text_native_body_characters(input_type: str) -> int:
     if input_type == "txt":
         return 3
     return 5
+
+
+def _min_concise_structured_body_characters(input_type: str) -> int:
+    if input_type == "txt":
+        return 3
+    return 2
 
 
 def _compute_text_native_structure_signals(
@@ -397,7 +420,13 @@ def _compute_text_native_structure_signals(
         "body_line_count": len(body_lines),
         "body_characters": body_characters,
         "paragraph_survival": bool(body_lines)
-        and body_characters >= _min_text_native_body_characters(input_type),
+        and (
+            body_characters >= _min_text_native_body_characters(input_type)
+            or (
+                bool(heading_lines)
+                and body_characters >= _min_concise_structured_body_characters(input_type)
+            )
+        ),
         "list_survival": len(list_lines) >= 1,
     }
 
