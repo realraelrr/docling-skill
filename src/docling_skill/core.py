@@ -84,7 +84,7 @@ class PageArtifacts:
     markdown_text: str
     images: list[ImageSidecar]
     quality: QualityReport
-    structured_document: dict[str, Any]
+    structured_document: dict[str, Any] | None = None
 
 
 @dataclass
@@ -542,29 +542,14 @@ def _collect_page_outputs(
         page_markdown=page_markdown,
         pictures_by_page=pictures_by_page,
     )
-    page_structured_documents = _collect_page_structured_documents(
-        result.document,
-        [page_no for page_no in sorted(page_markdown)],
-    )
 
     return {
         page_no: PageArtifacts(
             markdown_text=page_markdown[page_no],
             images=pictures_by_page.get(page_no, []),
             quality=page_quality[page_no],
-            structured_document=page_structured_documents[page_no],
         )
         for page_no in sorted(page_markdown)
-    }
-
-
-def _collect_page_structured_documents(
-    document: DoclingDocument,
-    page_numbers: list[int],
-) -> dict[int, dict[str, Any]]:
-    return {
-        page_no: _export_structured_document(document.filter(page_nrs={page_no}))
-        for page_no in sorted(set(page_numbers))
     }
 
 
@@ -691,6 +676,8 @@ def _assemble_attempt_from_pages(
     pdf_path: Path,
     *,
     page_outputs: dict[int, PageArtifacts],
+    fallback_document: DoclingDocument,
+    original_document_name: str,
     attempt_label: str,
     status: str,
     ocr_metadata: dict[str, Any],
@@ -713,7 +700,11 @@ def _assemble_attempt_from_pages(
         pictures=images,
         page_count=len(ordered_page_nos),
     )
-    structured_document = _merge_page_structured_documents(page_outputs)
+    structured_document = _merge_page_structured_documents(
+        page_outputs,
+        fallback_document=fallback_document,
+        original_document_name=original_document_name,
+    )
     manifest = _build_attempt_manifest(
         pdf_path,
         input_type="pdf",
@@ -798,10 +789,13 @@ def _merge_page_attempts(
             "pages": sorted(remediated_pages),
         },
     }
+    primary_document = DoclingDocument.model_validate(primary_attempt.structured_document)
 
     return _assemble_attempt_from_pages(
         Path(primary_attempt.manifest["source_file"]),
         page_outputs=merged_page_outputs,
+        fallback_document=primary_document,
+        original_document_name=primary_document.name,
         attempt_label="page_ocr_remediation",
         status=primary_attempt.manifest["status"],
         ocr_metadata=merged_ocr,
@@ -811,14 +805,25 @@ def _merge_page_attempts(
 
 def _merge_page_structured_documents(
     page_outputs: dict[int, PageArtifacts],
+    *,
+    fallback_document: DoclingDocument,
+    original_document_name: str,
 ) -> dict[str, Any]:
     ordered_page_documents = [
-        DoclingDocument.model_validate(page_outputs[page_no].structured_document)
+        (
+            DoclingDocument.model_validate(page_outputs[page_no].structured_document)
+            if page_outputs[page_no].structured_document is not None
+            else fallback_document.filter(page_nrs={page_no})
+        )
         for page_no in sorted(page_outputs)
     ]
-    if len(ordered_page_documents) == 1:
-        return _export_structured_document(ordered_page_documents[0])
-    return _export_structured_document(DoclingDocument.concatenate(ordered_page_documents))
+    merged_document = (
+        ordered_page_documents[0]
+        if len(ordered_page_documents) == 1
+        else DoclingDocument.concatenate(ordered_page_documents)
+    )
+    merged_document.name = original_document_name
+    return _export_structured_document(merged_document)
 
 
 def _pick_better_attempt(
@@ -902,7 +907,9 @@ def _remediate_pages(
             attempt_label=remediation_plan["attempt_label"],
             page_range=(page_no, page_no),
         )
-        remediated_pages[page_no] = remediated_page_attempt.page_outputs[page_no]
+        remediated_page = deepcopy(remediated_page_attempt.page_outputs[page_no])
+        remediated_page.structured_document = remediated_page_attempt.structured_document
+        remediated_pages[page_no] = remediated_page
 
     if not remediated_pages:
         return None

@@ -8,3 +8,4 @@
 - Added `source.docling.json` emission to the Python API and CLI output contract using the existing Docling conversion result
 - Updated package tests, README, localized README, and skill docs for the new sidecar
 - Fixed the page-level PDF remediation path so merged `source.docling.json` is rebuilt from per-page Docling documents instead of reusing stale primary JSON
+- Preserved original document identity in merged remediation JSON and made per-page Docling exports lazy outside the remediation path

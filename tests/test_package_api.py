@@ -291,12 +291,15 @@ def test_merge_page_attempts_rebuilds_structured_document_for_remediated_pages(t
                 structured_document=primary_page_two_doc,
             ),
         },
-        structured_document=DoclingDocument.concatenate(
-            [
-                DoclingDocument.model_validate(primary_page_one_doc),
-                DoclingDocument.model_validate(primary_page_two_doc),
-            ]
-        ).export_to_dict(),
+        structured_document={
+            **DoclingDocument.concatenate(
+                [
+                    DoclingDocument.model_validate(primary_page_one_doc),
+                    DoclingDocument.model_validate(primary_page_two_doc),
+                ]
+            ).export_to_dict(),
+            "name": input_path.name,
+        },
         manifest={
             "source_file": str(input_path),
             "status": "success",
@@ -325,6 +328,41 @@ def test_merge_page_attempts_rebuilds_structured_document_for_remediated_pages(t
     merged_markdown = merged_document.export_to_markdown()
 
     assert merged_attempt.markdown_text == "Primary page 1\n\nRemediated page 2"
+    assert merged_document.name == input_path.name
     assert "Primary page 1" in merged_markdown
     assert "Remediated page 2" in merged_markdown
     assert "Primary page 2 stale" not in merged_markdown
+
+
+def test_collect_page_outputs_does_not_export_per_page_structured_docs_eagerly(monkeypatch):
+    class FakePage:
+        def __init__(self, page_no: int):
+            self.page_no = page_no
+
+    class FakeDocument:
+        def filter(self, page_nrs=None):
+            raise AssertionError("page-level structured export should stay lazy")
+
+    class FakeResult:
+        document = FakeDocument()
+        pages = [FakePage(1), FakePage(2)]
+
+    monkeypatch.setattr(
+        core,
+        "_export_page_markdown",
+        lambda result: {1: "Primary page 1", 2: "Primary page 2"},
+    )
+    monkeypatch.setattr(
+        core,
+        "_assess_page_qualities",
+        lambda **kwargs: {1: _quality_report(), 2: _quality_report()},
+    )
+
+    page_outputs = core._collect_page_outputs(
+        FakeResult(),
+        pictures=[],
+        full_markdown_text="Primary page 1\n\nPrimary page 2",
+    )
+
+    assert page_outputs[1].structured_document is None
+    assert page_outputs[2].structured_document is None
