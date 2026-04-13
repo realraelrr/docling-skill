@@ -409,6 +409,10 @@ def _has_text_native_body_survival(
     if input_type == "txt":
         return bool(
             structure_signals["paragraph_survival"]
+            or (
+                structure_signals["has_list_markers"]
+                and structure_signals["list_survival"]
+            )
             or structure_signals["body_characters"] >= 3
         )
 

@@ -95,3 +95,15 @@ def test_text_native_quality_keeps_txt_expectations_looser():
     assert quality["status"] == "good"
     assert quality["agent_ready"] is True
     assert quality["reasons"] == []
+
+
+def test_text_native_quality_keeps_txt_list_only_output_good():
+    quality = _assess_text_native_quality(
+        markdown_text="- Buy milk\n- Eggs",
+        pictures=[],
+        input_type="txt",
+    )
+
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["reasons"] == []
