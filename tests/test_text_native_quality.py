@@ -25,16 +25,16 @@ def test_text_native_quality_keeps_html_heading_and_paragraph_output_good():
     assert quality["reasons"] == []
 
 
-def test_text_native_quality_rejects_collapsed_list_only_markdown():
+def test_text_native_quality_keeps_clean_list_only_markdown_good():
     quality = _assess_text_native_quality(
         markdown_text="# Shopping List\n\n- Eggs\n- Milk\n- Bread\n",
         pictures=[],
         input_type="md",
     )
 
-    assert quality["status"] == "failed_for_agent"
-    assert quality["agent_ready"] is False
-    assert "missing_body_structure" in quality["reasons"]
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["reasons"] == []
 
 
 def test_text_native_quality_rejects_near_empty_text_native_output():

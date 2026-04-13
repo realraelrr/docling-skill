@@ -398,7 +398,13 @@ def _has_text_native_body_survival(
             or structure_signals["body_characters"] >= 3
         )
 
-    return bool(structure_signals["paragraph_survival"])
+    return bool(
+        structure_signals["paragraph_survival"]
+        or (
+            structure_signals["has_list_markers"]
+            and structure_signals["list_survival"]
+        )
+    )
 
 
 def _normalize_analysis_line(line: str) -> str:
