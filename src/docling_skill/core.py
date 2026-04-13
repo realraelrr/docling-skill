@@ -22,6 +22,7 @@ from docling.datamodel.pipeline_options import (
     TesseractCliOcrOptions,
 )
 from docling_core.types.doc import ImageRefMode, PictureItem
+from docling_core.types.doc.document import DoclingDocument
 from docling_core.types.legacy_doc.base import Ref
 from docling_core.utils.legacy import docling_document_to_legacy
 
@@ -83,6 +84,7 @@ class PageArtifacts:
     markdown_text: str
     images: list[ImageSidecar]
     quality: QualityReport
+    structured_document: dict[str, Any]
 
 
 @dataclass
@@ -540,14 +542,29 @@ def _collect_page_outputs(
         page_markdown=page_markdown,
         pictures_by_page=pictures_by_page,
     )
+    page_structured_documents = _collect_page_structured_documents(
+        result.document,
+        [page_no for page_no in sorted(page_markdown)],
+    )
 
     return {
         page_no: PageArtifacts(
             markdown_text=page_markdown[page_no],
             images=pictures_by_page.get(page_no, []),
             quality=page_quality[page_no],
+            structured_document=page_structured_documents[page_no],
         )
         for page_no in sorted(page_markdown)
+    }
+
+
+def _collect_page_structured_documents(
+    document: DoclingDocument,
+    page_numbers: list[int],
+) -> dict[int, dict[str, Any]]:
+    return {
+        page_no: _export_structured_document(document.filter(page_nrs={page_no}))
+        for page_no in sorted(set(page_numbers))
     }
 
 
@@ -674,7 +691,6 @@ def _assemble_attempt_from_pages(
     pdf_path: Path,
     *,
     page_outputs: dict[int, PageArtifacts],
-    structured_document: dict[str, Any],
     attempt_label: str,
     status: str,
     ocr_metadata: dict[str, Any],
@@ -697,6 +713,7 @@ def _assemble_attempt_from_pages(
         pictures=images,
         page_count=len(ordered_page_nos),
     )
+    structured_document = _merge_page_structured_documents(page_outputs)
     manifest = _build_attempt_manifest(
         pdf_path,
         input_type="pdf",
@@ -785,12 +802,23 @@ def _merge_page_attempts(
     return _assemble_attempt_from_pages(
         Path(primary_attempt.manifest["source_file"]),
         page_outputs=merged_page_outputs,
-        structured_document=primary_attempt.structured_document,
         attempt_label="page_ocr_remediation",
         status=primary_attempt.manifest["status"],
         ocr_metadata=merged_ocr,
         remediated_pages=sorted(remediated_pages),
     )
+
+
+def _merge_page_structured_documents(
+    page_outputs: dict[int, PageArtifacts],
+) -> dict[str, Any]:
+    ordered_page_documents = [
+        DoclingDocument.model_validate(page_outputs[page_no].structured_document)
+        for page_no in sorted(page_outputs)
+    ]
+    if len(ordered_page_documents) == 1:
+        return _export_structured_document(ordered_page_documents[0])
+    return _export_structured_document(DoclingDocument.concatenate(ordered_page_documents))
 
 
 def _pick_better_attempt(

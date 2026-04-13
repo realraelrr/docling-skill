@@ -7,3 +7,4 @@
 - Began Priority 1 execution for `source.docling.json`
 - Added `source.docling.json` emission to the Python API and CLI output contract using the existing Docling conversion result
 - Updated package tests, README, localized README, and skill docs for the new sidecar
+- Fixed the page-level PDF remediation path so merged `source.docling.json` is rebuilt from per-page Docling documents instead of reusing stale primary JSON
