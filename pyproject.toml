@@ -13,8 +13,8 @@ authors = [
   { name = "Rael" },
 ]
 dependencies = [
-  "docling>=2.84.0,<2.85.0",
-  "docling-core>=2.70.0,<3.0.0",
+  "docling>=2.88.0,<2.89.0",
+  "docling-core>=2.73.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
