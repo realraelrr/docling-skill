@@ -1,100 +1,46 @@
 # docling-skill
 
-`docling-skill` 是一个构建在 [Docling](https://github.com/docling-project/docling) 之上的、本地优先、面向 Agent 的文档规范化与 ingestion 层。
+`docling-skill` 是一个构建在 [Docling](https://github.com/docling-project/docling) 之上的本地优先、面向 Agent 的 ingestion 层。它把本地文档转换成稳定的 `source.*` sidecar 契约，方便 LLM agent 先检查质量，再安全消费内容。
 
 [English README](README.md)
 
-它会把本地文档产物转成 workflow-ready 的标准产物：
+## 它做什么
 
-- `source.md`：面向 Agent 的 Markdown 正文
-- `source.docling.json`：与 `source.md` 来自同一次转换结果的结构化 Docling 文档导出
-- `source.images.json`：在支持提图时输出、带稳定占位符和 base64 的图片 sidecar
-- `source.manifest.json`：质量、补救路径和路由决策元数据
-- `source.meta.json`：供下游 agent 和 workflow 主控读取的轻量 ingestion 元数据
+当前支持的本地输入：`pdf`、`docx`、`html`、`txt`、`md`。
 
-核心原则很简单：Agent 不应该直接盲信提取出来的 Markdown，而应该先读 manifest，再决定结果是否可用。只要 manifest 判断结果可用，Agent 就先读 `source.md`；如果系统需要恢复或深入查看被 Markdown 抹平的结构，再回到 `source.docling.json`。
+每次成功转换都会写出：
 
-## Workflow 边界
+| Artifact | 用途 |
+| --- | --- |
+| `source.manifest.json` | 质量、路由、补救路径和信任元数据 |
+| `source.md` | Agent 默认读取的 Markdown |
+| `source.docling.json` | 与 `source.md` 来自同一次转换结果的权威 Docling 结构化导出 |
+| `source.images.json` | 支持提图时输出的图片 sidecar 和稳定占位符 |
+| `source.meta.json` | 供下游 workflow 使用的轻量 ingestion 元数据 |
 
-`docling-skill` 在整个知识库 workflow 里只负责 ingestion：
+下游消费规则：
 
-- 直接输出 `source.*` 契约
-- 当前接受本地 `pdf`、`docx`、`html`、`txt`、`md` 输入
-- 保留 manifest-first 质量控制面
-- 不负责 chunking，chunking 属于 ingestion 之后的通用 normalize 阶段
-- 不负责标签、关键词、资料分类、一句话摘要等知识库语义字段
-- 不负责远程 URL 抓取；远程获取属于上游 fetcher / browser 层
+1. 先读 `source.manifest.json`。
+2. 如果 `quality.agent_ready` 为 true，默认读取 `source.md`。
+3. 需要结构恢复、校正 Markdown 歧义或深入检查时，读取 `source.docling.json`。
+4. 通过 `source.images.json` 解析 `[[image:picture-p2-1]]` 这类图片占位符。
 
-## 为什么要有这个项目
+`docling-skill` 不负责远程 URL 抓取、文档 chunking，也不输出标签、关键词、分类、摘要等下游知识库字段。
 
-Docling 的强项是文档解析。`docling-skill` 补的是面向 Agent 的消费契约：
-
-- manifest-first 消费方式
-- 稳定图片占位符，例如 `[[image:picture-p3-0]]`
-- 面向 Agent 的质量门禁
-- 面向 PDF 工作流的 OCR 补救
-- 针对局部弱页的 page-level remediation
-- 明确的结果状态：`good`、`salvaged`、`failed_for_agent`
-
-这个仓库刻意保持为官方 `docling` 之上的薄层，而不是长期维护整个上游 fork。
-
-## 致谢
-
-`docling-skill` 依赖官方 [Docling](https://github.com/docling-project/docling) 项目及其文档转换栈。感谢 Docling 维护者持续提供解析器、文档模型和多格式支持，本项目是在这些能力之上补充 Agent workflow 契约。
-
-这个项目是外部 Agent workflow 层，不是官方 Docling 发行版。如果这个仓库对你的工作有帮助，也请考虑引用或致谢作为上游 document AI toolkit 的 Docling。
-
-## Agent 框架支持
-
-这个仓库用同一份源 skill 同时支持 Codex 和 Claude Code：
-
-- Codex 可以从 `~/.codex/skills/docling-skill` 加载。
-- Claude Code 可以从 `~/.claude/skills/docling-skill` 加载。
-
-两个安装位置都应指向这个仓库，推荐使用 symlink，这样 `SKILL.md` 始终是唯一 source of truth。运行时专属的 UI 元数据放在 `agents/` 下。
-
-## Agent Setup Instructions
-
-如果你是 Codex、Claude Code 或其他 LLM agent，并且需要从零安装和配置这个项目，请把这个仓库当作 source of truth，并从它配置各个运行时的 skill 安装位置。
-
-源仓库：
-
-```text
-https://github.com/realraelrr/docling-skill.git
-```
-
-请执行以下事项：
-
-- 将仓库 clone 到用户的本地代码工作区。
-- 安装到现有的 `docling` conda 环境；如果配置了 SOCKS 代理，使用 proxy extra。
-- 配置 Codex 和 Claude Code 从同一份 repo source 加载 skill：
-  - `~/.codex/skills/docling-skill`
-  - `~/.claude/skills/docling-skill`
-- 优先使用 symlink，不要复制 skill，这样 `SKILL.md` 始终是唯一 source of truth。
-- 验证两个安装路径下的 skill 都有效。
-- 运行项目测试套件。
-- 不要提交 `.state/` 或其他 agent working files。
-
-预期验证：
-
-- 两个安装路径都能通过 `quick_validate.py`。
-- `conda run -n docling python -m pytest` 通过。
-- 使用一个本地样本文档转换后，输出 `source.md`、`source.docling.json`、`source.images.json`、`source.manifest.json` 和 `source.meta.json`。
-
-## 快速开始
+## 安装
 
 ```bash
 pip install "git+https://github.com/realraelrr/docling-skill.git@v0.1.2"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
-如果你的运行环境使用 SOCKS 代理，安装 proxy extra：
+如果运行环境使用 SOCKS 代理：
 
 ```bash
 pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v0.1.2"
 ```
 
-如果是本地开发：
+本地开发：
 
 ```bash
 git clone https://github.com/realraelrr/docling-skill.git
@@ -102,50 +48,21 @@ cd docling-skill
 pip install -e ".[proxy]"
 ```
 
-## 首页示例
+## 使用
 
-先转换一个本地文档：
-
-```bash
-docling-skill "/path/to/file.docx" "/tmp/docling-sidecar"
-```
-
-在消费 Markdown 之前，先检查 manifest：
-
-```bash
-python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "reasons": m["quality"]["reasons"], "selected_attempt": m["selected_attempt"]})'
-```
-
-典型输出：
-
-```json
-{
-  "status": "good",
-  "reasons": [],
-  "selected_attempt": "primary"
-}
-```
-
-只有在这一步之后，下游才应该继续消费这些产物：
-
-- Agent 先读 `/tmp/docling-sidecar/source.md`
-- 系统在需要权威结构或恢复细节时回到 `/tmp/docling-sidecar/source.docling.json`
-- 多模态流程通过 `/tmp/docling-sidecar/source.images.json` 解析图片占位符
-- 编排层可读取 `/tmp/docling-sidecar/source.meta.json`
-
-## CLI
+CLI：
 
 ```bash
 docling-skill "<input_path>" "<output_dir>"
 ```
 
-等价的模块入口：
+等价模块入口：
 
 ```bash
 python -m docling_skill.cli "<input_path>" "<output_dir>"
 ```
 
-可选参数：
+偏 PDF/OCR 的可选参数：
 
 ```bash
 --ocr-engine auto|tesseract|ocrmac|rapidocr
@@ -154,7 +71,13 @@ python -m docling_skill.cli "<input_path>" "<output_dir>"
 --no-ocr-remediation
 ```
 
-## Python API
+检查 manifest：
+
+```bash
+python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "agent_ready": m["quality"]["agent_ready"], "selected_attempt": m["selected_attempt"]})'
+```
+
+Python API：
 
 ```python
 from pathlib import Path
@@ -167,7 +90,7 @@ outputs = convert_document_to_ingestion_outputs(
 )
 
 manifest = outputs["manifest"]
-if manifest["quality"]["status"] != "good":
+if not manifest["quality"]["agent_ready"]:
     raise RuntimeError(manifest["quality"])
 
 markdown_text = outputs["markdown_text"]
@@ -176,100 +99,56 @@ images = outputs["images"]
 meta = outputs["meta"]
 ```
 
-## 输出契约
+## Agent 配置
 
-CLI 会写出：
+这个仓库用同一份源 skill 同时支持 Codex 和 Claude Code：
 
-- `source.md`
-- `source.docling.json`
-- `source.images.json`
-- `source.manifest.json`
-- `source.meta.json`
+- Codex：`~/.codex/skills/docling-skill`
+- Claude Code：`~/.claude/skills/docling-skill`
 
-其中 `source.manifest.json` 是下游 Agent 的控制平面，`source.docling.json` 是权威结构 sidecar，供需要机器可读结构或 Markdown 恢复路径的消费者使用，`source.meta.json` 是下游 workflow 的桥接元数据。
+如果你是 Codex、Claude Code 或其他 LLM agent，需要从零安装配置这个项目：
 
-重点字段：
+1. 把这个仓库当作 source of truth。
+2. 将仓库 clone 到用户的本地代码工作区。
+3. 安装到现有的 `docling` conda 环境；如果配置了 SOCKS 代理，使用 `proxy` extra。
+4. 让两个 agent skill 路径都指向这个 repo，优先使用 symlink，不要复制。
+5. 验证两个安装路径下的 skill。
+6. 运行测试套件。
+7. 不要提交 `.state/` 或其他 agent working files。
 
-- `manifest["quality"]["status"]`
-- `manifest["quality"]["agent_ready"]`
-- `manifest["quality"]["reasons"]`
-- `manifest["quality"]["content_trust"]`
-- `manifest["preferred_agent_artifact"]`
-- `manifest["authoritative_artifact"]`
-- `manifest["available_artifacts"]`
-- `manifest["selected_attempt"]`
-- `manifest["ocr_remediation_applied"]`
+预期验证：
 
-下游规则：
+```bash
+python3 /Users/rael/.codex/skills/.system/skill-creator/scripts/quick_validate.py ~/.codex/skills/docling-skill
+python3 /Users/rael/.codex/skills/.system/skill-creator/scripts/quick_validate.py ~/.claude/skills/docling-skill
+conda run -n docling python -m pytest
+```
 
-- 先读 `source.manifest.json`
-- 如果 manifest 判断结果可用，Agent 优先读取 `source.md`
-- 如果系统需要恢复结构、校正 Markdown 歧义，或查看更细的版面信息，再读取 `source.docling.json`
+## 契约说明
 
-状态含义：
+下游系统通常需要关注这些 manifest 字段：
 
-- `good`：默认可安全交给下游 Agent
-- `salvaged`：可用，但来自补救路径
-- `failed_for_agent`：不要当成干净的 ingestion 结果使用
+- `quality.status`：`good`、`salvaged` 或 `failed_for_agent`
+- `quality.agent_ready`：是否可以默认交给 Agent 消费
+- `quality.content_trust`：用于路由的质量信号
+- `preferred_agent_artifact`：当前固定为 `source.md`
+- `authoritative_artifact`：当前固定为 `source.docling.json`
+- `available_artifacts`
+- `selected_attempt`
+- `ocr_remediation_applied`
 
-对 text-native 输入来说，`good` 的含义是转换后的 Markdown 仍然保留了可用的正文结构。
-它不等于“Docling 解析成功”或“Markdown 不是空字符串”。
-对 `docx`、`html`、`md`，质量门控接受仍然保留下来的段落/正文结构，包括较短但完整的正文，或在列表本身就是主要内容时保留良好的列表结构。
-对 `txt`，规则会更宽松，因为纯文本本来就可能缺少显式结构。
+对 text-native 输入来说，`good` 表示转换后的 Markdown 仍保留可用正文结构，不只是“Docling 解析成功”或“Markdown 非空”。对 `txt`，门槛会更宽松，因为纯文本本来就缺少显式结构。
 
-`source.meta.json` 的字段范围固定为 ingestion 阶段可知信息：
+图片提取取决于格式。本地 PDF 的嵌入图片是支持的；其他本地格式只有在 Docling 暴露图片时才可能产出 sidecar。HTML / 网页图片抓取属于 fetcher / browser 层，不属于这个 ingestion 步骤。
 
-- `job_id`
-- `input_type`
-- `source_title`
-- `source_url`
-- `source_attachment`
-- `author`
-- `published_at`
-- `extractor`
-- `pipeline_family`
-- `quality_status`
-- `quality_reasons`
-- `char_count`
+## 范围
 
-它不承载标签、关键词、资料分类、一句话摘要等知识库语义字段。
+`docling-skill` 是官方 `docling` 之上的薄 workflow 层，不是 Docling fork，也不是官方发行版。
 
-## 图片 Sidecar
+Docling 支持的格式比本项目当前暴露的更多。新增格式时，必须先保证它能保留本地 `source.*` 契约、质量门禁和测试。
 
-Markdown 中会出现形如 `[[image:picture-p2-1]]` 的占位符。
+OCR 补救主要对 PDF 输入有意义。DOCX、HTML、TXT、Markdown 通常不需要 PDF 那套补救路径。
 
-图片提取并不是所有已支持格式都统一具备。只有在 `source.images.json` 中确实存在对应条目时，才使用这个占位符去解析图片，再按当前运行时支持的多模态输入方式传给模型。
+## 致谢
 
-当前图片处理边界：
-
-- 本地 PDF 中的嵌入图片是支持的。
-- 其他本地格式在 Docling 暴露图片时也可能产出 sidecar，但不要默认认为所有格式行为一致。
-- HTML / 网页图片抓取应由更大 workflow 里的 fetcher / browser 层负责，而不是这个 ingestion 步骤。
-
-每条图片记录包含：
-
-- `id`
-- `placeholder`
-- `page_no`
-- `bbox`
-- `mime_type`
-- `base64`
-
-## 设计原则
-
-- Markdown 保持 text-first，不内嵌图片 base64
-- Agent 的信任决策应来自 manifest，而不是在下游再堆一层临时 heuristics
-- OCR 补救路径在启用时必须显式、可检查
-- 如果只是少数页面质量差，优先做 page-level remediation，而不是整篇重跑
-
-## 与上游的边界
-
-`docling-skill` 依赖官方 `docling`。
-
-当前本地 workflow 契约支持 `pdf`、`docx`、`html`、`txt`、`md`。
-
-OCR 相关参数主要对 PDF 输入有意义。像 DOCX、HTML、TXT、Markdown 这样的 text-native 格式通常不需要 PDF 那套补救路径。
-
-Docling 上游支持的格式更广，但这些能力在当前 workflow phase 里仍然属于范围外，除非这里明确把它们纳入本地 `source.*` 契约。
-
-使用 SOCKS 代理的环境应安装 `proxy` extra，让官方 `docling` 及其下载依赖可以直接处理 SOCKS 代理 URL，而不是 patch 上游代码。
+感谢 Docling 维护者提供解析器、文档模型和多格式支持，本项目是在这些能力之上补充 Agent workflow 契约。如果这个仓库对你的工作有帮助，也请考虑引用或致谢作为上游 document AI toolkit 的 [Docling](https://github.com/docling-project/docling)。

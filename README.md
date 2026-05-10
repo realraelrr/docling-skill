@@ -1,94 +1,40 @@
 # docling-skill
 
-`docling-skill` is a local, agent-first document normalization and ingestion layer built on top of [Docling](https://github.com/docling-project/docling).
+`docling-skill` is a local, agent-first ingestion layer built on top of [Docling](https://github.com/docling-project/docling). It converts local documents into a stable `source.*` sidecar contract that LLM agents can inspect and consume safely.
 
 [中文说明](README.zh-CN.md)
 
-It turns a local document artifact into workflow-ready artifacts that LLM agents can consume directly:
+## What It Does
 
-- `source.md`: agent-readable markdown
-- `source.docling.json`: structured Docling document export from the same conversion result as `source.md`
-- `source.images.json`: image sidecars with stable placeholders and base64 payloads when extraction is available
-- `source.manifest.json`: quality, remediation, and routing metadata
-- `source.meta.json`: lightweight ingestion metadata for downstream agents
+Supported local inputs: `pdf`, `docx`, `html`, `txt`, and `md`.
 
-The key idea is simple: agents should not trust extracted markdown blindly. They should read the manifest first, then decide whether the result is safe to use. Once the manifest says the extraction is usable, agents read `source.md` first; systems recover or deepen from `source.docling.json` when they need structure that Markdown flattened away.
+Each successful conversion writes:
 
-## Workflow Boundary
+| Artifact | Purpose |
+| --- | --- |
+| `source.manifest.json` | Quality, routing, remediation, and trust metadata |
+| `source.md` | Default agent-readable Markdown |
+| `source.docling.json` | Authoritative structured Docling export from the same conversion result |
+| `source.images.json` | Image sidecars with stable placeholders when extraction is available |
+| `source.meta.json` | Lightweight ingestion metadata for downstream workflows |
 
-`docling-skill` is the ingestion layer for a larger workflow. Its contract is intentionally narrow:
+Downstream rule:
 
-- It emits `source.*` ingestion artifacts directly.
-- It currently accepts local `pdf`, `docx`, `html`, `txt`, and `md` inputs.
-- It keeps manifest-first quality gating as the control plane.
-- It does not do chunking. Chunking belongs to the generic normalization stage after ingestion.
-- It does not emit knowledge-base semantic fields such as tags, keywords, category, or one-line summary.
-- It does not fetch remote URLs. Remote acquisition belongs to the fetcher/browser layer upstream.
+1. Read `source.manifest.json` first.
+2. If `quality.agent_ready` is true, read `source.md` by default.
+3. Use `source.docling.json` when structure, recovery, or deeper inspection matters.
+4. Resolve image placeholders such as `[[image:picture-p2-1]]` through `source.images.json`.
 
-## Why This Exists
+`docling-skill` intentionally does not fetch remote URLs, chunk documents, or emit downstream knowledge fields such as tags, keywords, categories, or summaries.
 
-Docling is strong at document parsing. `docling-skill` adds the agent-facing contract around it:
-
-- manifest-first consumption
-- stable image placeholders like `[[image:picture-p3-0]]`
-- agent-quality gating
-- OCR remediation for PDF workflows
-- page-level remediation for weak pages inside otherwise good documents
-- explicit result taxonomy: `good`, `salvaged`, `failed_for_agent`
-
-This repository is intentionally a thin layer on top of official `docling`, not a long-lived fork of the full upstream project.
-
-## Acknowledgements
-
-`docling-skill` depends on the official [Docling](https://github.com/docling-project/docling) project and its document conversion stack. Thanks to the Docling maintainers for the parser, document model, and ongoing format support this project builds on.
-
-This project is an external agent workflow layer, not an official Docling distribution. If this repository helps your work, consider citing or acknowledging Docling as the upstream document AI toolkit.
-
-## Agent Framework Support
-
-This repository supports both Codex and Claude Code from the same source skill:
-
-- Codex can load the skill from `~/.codex/skills/docling-skill`.
-- Claude Code can load the skill from `~/.claude/skills/docling-skill`.
-
-Keep both installed locations pointed at this repository, preferably with symlinks, so `SKILL.md` remains the single source of truth. Runtime-specific UI metadata lives under `agents/`.
-
-## Agent Setup Instructions
-
-If you are Codex, Claude Code, or another LLM agent setting up this project from scratch, treat the repository as the source of truth and configure installed skills from it.
-
-Source repo:
-
-```text
-https://github.com/realraelrr/docling-skill.git
-```
-
-Do the following:
-
-- Clone the repo into the user's local code workspace.
-- Install it into the existing conda environment named `docling`, using the proxy extra if SOCKS proxies are configured.
-- Configure both Codex and Claude Code to load the skill from the same repo source:
-  - `~/.codex/skills/docling-skill`
-  - `~/.claude/skills/docling-skill`
-- Prefer symlinks instead of copying the skill, so `SKILL.md` stays the single source of truth.
-- Validate both installed skill paths.
-- Run the project test suite.
-- Do not commit `.state/` or other agent working files.
-
-Expected verification:
-
-- `quick_validate.py` passes for both installed skill paths.
-- `conda run -n docling python -m pytest` passes.
-- A sample local document conversion emits `source.md`, `source.docling.json`, `source.images.json`, `source.manifest.json`, and `source.meta.json`.
-
-## Quickstart
+## Install
 
 ```bash
 pip install "git+https://github.com/realraelrr/docling-skill.git@v0.1.2"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
-If your runtime uses SOCKS proxies, install the proxy extra:
+If your environment uses SOCKS proxies:
 
 ```bash
 pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v0.1.2"
@@ -102,38 +48,9 @@ cd docling-skill
 pip install -e ".[proxy]"
 ```
 
-## Homepage Example
+## Use
 
-Convert a local document:
-
-```bash
-docling-skill "/path/to/file.docx" "/tmp/docling-sidecar"
-```
-
-Inspect the manifest before using the markdown:
-
-```bash
-python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "reasons": m["quality"]["reasons"], "selected_attempt": m["selected_attempt"]})'
-```
-
-Typical output:
-
-```json
-{
-  "status": "good",
-  "reasons": [],
-  "selected_attempt": "primary"
-}
-```
-
-Only after that should downstream consumers use the outputs:
-
-- Agents read `/tmp/docling-sidecar/source.md` first.
-- Systems recover or deepen from `/tmp/docling-sidecar/source.docling.json` when they need authoritative structure.
-- Multimodal flows resolve placeholders through `/tmp/docling-sidecar/source.images.json`.
-- Orchestrators can read `/tmp/docling-sidecar/source.meta.json`.
-
-## CLI
+CLI:
 
 ```bash
 docling-skill "<input_path>" "<output_dir>"
@@ -145,7 +62,7 @@ Equivalent module entrypoint:
 python -m docling_skill.cli "<input_path>" "<output_dir>"
 ```
 
-Optional flags:
+PDF-oriented OCR options:
 
 ```bash
 --ocr-engine auto|tesseract|ocrmac|rapidocr
@@ -154,7 +71,13 @@ Optional flags:
 --no-ocr-remediation
 ```
 
-## Python API
+Manifest check:
+
+```bash
+python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "agent_ready": m["quality"]["agent_ready"], "selected_attempt": m["selected_attempt"]})'
+```
+
+Python API:
 
 ```python
 from pathlib import Path
@@ -167,7 +90,7 @@ outputs = convert_document_to_ingestion_outputs(
 )
 
 manifest = outputs["manifest"]
-if manifest["quality"]["status"] != "good":
+if not manifest["quality"]["agent_ready"]:
     raise RuntimeError(manifest["quality"])
 
 markdown_text = outputs["markdown_text"]
@@ -176,102 +99,56 @@ images = outputs["images"]
 meta = outputs["meta"]
 ```
 
-## Output Contract
+## Agent Setup
 
-The CLI writes:
+This repository supports both Codex and Claude Code from the same source skill:
 
-- `source.md`
-- `source.docling.json`
-- `source.images.json`
-- `source.manifest.json`
-- `source.meta.json`
+- Codex: `~/.codex/skills/docling-skill`
+- Claude Code: `~/.claude/skills/docling-skill`
 
-`source.manifest.json` is the control plane for downstream agents.
-`source.docling.json` is the authoritative structured sidecar for consumers that need machine-readable document structure or a recovery path beyond Markdown.
-`source.meta.json` is the bridge metadata for downstream agents and orchestrators.
+If you are Codex, Claude Code, or another LLM agent setting up this project from scratch:
 
-Important fields:
+1. Treat this repository as the source of truth.
+2. Clone it into the user's local code workspace.
+3. Install it into the existing conda environment named `docling`, using the `proxy` extra when SOCKS proxies are configured.
+4. Point both agent skill paths at this repo, preferably with symlinks instead of copies.
+5. Validate both installed skill paths.
+6. Run the test suite.
+7. Do not commit `.state/` or other agent working files.
 
-- `manifest["quality"]["status"]`
-- `manifest["quality"]["agent_ready"]`
-- `manifest["quality"]["reasons"]`
-- `manifest["quality"]["content_trust"]`
-- `manifest["preferred_agent_artifact"]`
-- `manifest["authoritative_artifact"]`
-- `manifest["available_artifacts"]`
-- `manifest["selected_attempt"]`
-- `manifest["ocr_remediation_applied"]`
+Expected verification:
 
-Downstream rule:
+```bash
+python3 /Users/rael/.codex/skills/.system/skill-creator/scripts/quick_validate.py ~/.codex/skills/docling-skill
+python3 /Users/rael/.codex/skills/.system/skill-creator/scripts/quick_validate.py ~/.claude/skills/docling-skill
+conda run -n docling python -m pytest
+```
 
-- Read `source.manifest.json` first.
-- If the manifest is usable, agents read `source.md` first.
-- If a system needs to recover structure, reconcile ambiguous Markdown, or inspect layout-aware detail, use `source.docling.json`.
+## Contract Notes
 
-Status meanings:
+Manifest fields that downstream systems normally care about:
 
-- `good`: safe default for downstream agent consumption
-- `salvaged`: usable, but selected from a remediation path
-- `failed_for_agent`: do not present as clean ingestion
+- `quality.status`: `good`, `salvaged`, or `failed_for_agent`
+- `quality.agent_ready`: whether the result is safe for default agent consumption
+- `quality.content_trust`: quality signals used for routing
+- `preferred_agent_artifact`: currently always `source.md`
+- `authoritative_artifact`: currently always `source.docling.json`
+- `available_artifacts`
+- `selected_attempt`
+- `ocr_remediation_applied`
 
-For text-native inputs, `good` means the converted Markdown still preserves usable body structure.
-It is not equivalent to "Docling parsed the file" or "the Markdown is merely non-empty."
-For `docx`, `html`, and `md`, the quality gate accepts surviving paragraph/body structure, including concise body text, or preserved list structure where that is the real content.
-For `txt`, the gate stays looser because plain text often has less explicit structure.
+For text-native inputs, `good` means the converted Markdown still preserves usable body structure. It is not merely "Docling parsed the file" or "Markdown is non-empty." For `txt`, the gate is looser because plain text has less explicit structure.
 
-`source.meta.json` intentionally stays limited to ingestion metadata:
+Image extraction is format-dependent. Embedded images in local PDFs are supported; other local formats may produce sidecars only when Docling exposes them. HTML and webpage image capture belongs to the fetcher/browser layer, not this ingestion step.
 
-- `job_id`
-- `input_type`
-- `source_title`
-- `source_url`
-- `source_attachment`
-- `author`
-- `published_at`
-- `extractor`
-- `pipeline_family`
-- `quality_status`
-- `quality_reasons`
-- `char_count`
+## Scope
 
-It does not include downstream knowledge fields such as tags, keywords, category, or summary.
+`docling-skill` is a thin workflow layer on top of official `docling`, not a Docling fork or official distribution.
 
-## Image Sidecars
+Docling supports more formats than this project exposes. New formats should only be added when they preserve the local `source.*` contract, quality gating, and tests.
 
-Markdown includes placeholders such as `[[image:picture-p2-1]]`.
+OCR remediation is mainly relevant for PDF inputs. DOCX, HTML, TXT, and Markdown usually do not need the PDF remediation path.
 
-Image extraction is not universal across all supported formats. Use the placeholder to resolve the matching entry in `source.images.json` when an image sidecar entry is present, then pass the image through your runtime's multimodal input path.
+## Acknowledgements
 
-Current image guidance:
-
-- Embedded images in local PDFs are supported.
-- Some other local formats may yield image sidecars when Docling exposes them, but do not assume parity across formats.
-- HTML and webpage image capture should be owned by the fetcher/browser layer in the larger workflow, not by this ingestion step.
-
-Each image record includes:
-
-- `id`
-- `placeholder`
-- `page_no`
-- `bbox`
-- `mime_type`
-- `base64`
-
-## Design Principles
-
-- Markdown should stay text-first and never inline image base64.
-- Agents should make trust decisions from the manifest, not from ad hoc heuristics downstream.
-- OCR remediation should be explicit and inspectable when used.
-- Page-level remediation is better than rerunning the whole document when only a few pages are weak.
-
-## Upstream Boundary
-
-`docling-skill` depends on official `docling`.
-
-The current local workflow contract supports `pdf`, `docx`, `html`, `txt`, and `md`.
-
-OCR flags are mainly relevant for PDF inputs. Text-native formats such as DOCX, HTML, TXT, and Markdown typically do not need the PDF remediation path.
-
-Docling itself supports many more formats. Those broader upstream capabilities remain out of scope for this workflow phase unless they are explicitly added to the local `source.*` contract here.
-
-SOCKS proxy environments should install the `proxy` extra so official `docling` and its download dependencies can use SOCKS proxy URLs without patching upstream code.
+Thanks to the Docling maintainers for the parser, document model, and format support this project builds on. If this repository helps your work, consider citing or acknowledging [Docling](https://github.com/docling-project/docling) as the upstream document AI toolkit.
