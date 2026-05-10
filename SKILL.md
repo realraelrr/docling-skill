@@ -1,6 +1,11 @@
 ---
 name: docling-skill
 description: Use when converting local documents with docling-skill into agent-ready sidecar outputs, especially PDF, DOCX, HTML, TXT, or Markdown inputs that need manifest-gated Markdown, structured Docling JSON, image sidecars, OCR remediation, or knowledge-base ingestion.
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Glob
 ---
 
 # docling-skill
@@ -13,16 +18,24 @@ description: Use when converting local documents with docling-skill into agent-r
 
 ## Preconditions
 - If you use the relative command, run from the `docling-skill` repo root.
-- Runtime: `conda` environment `docling`
+- Runtime: `conda` environment `docling`, or pip-installed `docling-skill` CLI.
 - Always provide an explicit output directory unless the user explicitly accepts `/tmp/docling-output`.
 
 ## Canonical Command
+
+Conda environment:
 
 ```bash
 conda run -n docling python \
   -m docling_skill.cli \
   "<input_path>" \
   "<output_dir>"
+```
+
+Or if installed via pip:
+
+```bash
+docling-skill "<input_path>" "<output_dir>"
 ```
 
 Optional flags:

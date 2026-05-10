@@ -38,17 +38,26 @@ Docling is strong at document parsing. `docling-skill` adds the agent-facing con
 
 This repository is intentionally a thin layer on top of official `docling`, not a long-lived fork of the full upstream project.
 
+## Agent Framework Support
+
+This repository supports both Codex and Claude Code from the same source skill:
+
+- Codex can load the skill from `~/.codex/skills/docling-skill`.
+- Claude Code can load the skill from `~/.claude/skills/docling-skill`.
+
+Keep both installed locations pointed at this repository, preferably with symlinks, so `SKILL.md` remains the single source of truth. Runtime-specific UI metadata lives under `agents/`.
+
 ## Quickstart
 
 ```bash
-pip install "git+https://github.com/realraelrr/docling-skill.git@v0.1.0"
+pip install "git+https://github.com/realraelrr/docling-skill.git@v0.1.1"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
 If your runtime uses SOCKS proxies, install the proxy extra:
 
 ```bash
-pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v0.1.0"
+pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v0.1.1"
 ```
 
 For local development:
