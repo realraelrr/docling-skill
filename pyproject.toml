@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docling-skill"
-version = "0.1.1"
+version = "0.1.2"
 description = "Agent-oriented sidecar extraction on top of Docling."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,8 +13,8 @@ authors = [
   { name = "Rael" },
 ]
 dependencies = [
-  "docling>=2.88.0,<2.89.0",
-  "docling-core>=2.73.0,<3.0.0",
+  "docling>=2.93.0,<2.94.0",
+  "docling-core>=2.74.1,<3.0.0",
 ]
 
 [project.optional-dependencies]
