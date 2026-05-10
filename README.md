@@ -47,6 +47,34 @@ This repository supports both Codex and Claude Code from the same source skill:
 
 Keep both installed locations pointed at this repository, preferably with symlinks, so `SKILL.md` remains the single source of truth. Runtime-specific UI metadata lives under `agents/`.
 
+## Agent Setup Instructions
+
+If you are Codex, Claude Code, or another LLM agent setting up this project from scratch, treat the repository as the source of truth and configure installed skills from it.
+
+Source repo:
+
+```text
+https://github.com/realraelrr/docling-skill.git
+```
+
+Do the following:
+
+- Clone the repo into the user's local code workspace.
+- Install it into the existing conda environment named `docling`, using the proxy extra if SOCKS proxies are configured.
+- Configure both Codex and Claude Code to load the skill from the same repo source:
+  - `~/.codex/skills/docling-skill`
+  - `~/.claude/skills/docling-skill`
+- Prefer symlinks instead of copying the skill, so `SKILL.md` stays the single source of truth.
+- Validate both installed skill paths.
+- Run the project test suite.
+- Do not commit `.state/` or other agent working files.
+
+Expected verification:
+
+- `quick_validate.py` passes for both installed skill paths.
+- `conda run -n docling python -m pytest` passes.
+- A sample local document conversion emits `source.md`, `source.docling.json`, `source.images.json`, `source.manifest.json`, and `source.meta.json`.
+
 ## Quickstart
 
 ```bash
