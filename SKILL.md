@@ -1,6 +1,6 @@
 ---
 name: docling-skill
-description: Use when converting documents with docling-skill into workflow-ready sidecar outputs, especially when the caller needs Markdown, image sidecars, OCR remediation, or manifest-based quality checks.
+description: Use when converting local documents with docling-skill into agent-ready sidecar outputs, especially PDF, DOCX, HTML, TXT, or Markdown inputs that need manifest-gated Markdown, structured Docling JSON, image sidecars, OCR remediation, or knowledge-base ingestion.
 ---
 
 # docling-skill

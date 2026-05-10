@@ -45,11 +45,10 @@ pip install "git+https://github.com/realraelrr/docling-skill.git@v0.1.0"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
-如果你的运行环境使用 SOCKS 代理，建议额外安装：
+如果你的运行环境使用 SOCKS 代理，安装 proxy extra：
 
 ```bash
-pip install "git+https://github.com/realraelrr/docling-skill.git@v0.1.0"
-pip install socksio
+pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v0.1.0"
 ```
 
 如果是本地开发：
@@ -57,7 +56,7 @@ pip install socksio
 ```bash
 git clone https://github.com/realraelrr/docling-skill.git
 cd docling-skill
-pip install -e .
+pip install -e ".[proxy]"
 ```
 
 ## 首页示例
@@ -230,9 +229,4 @@ OCR 相关参数主要对 PDF 输入有意义。像 DOCX、HTML、TXT、Markdown
 
 Docling 上游支持的格式更广，但这些能力在当前 workflow phase 里仍然属于范围外，除非这里明确把它们纳入本地 `source.*` 契约。
 
-目前它和 `pdf-ingest` 工作 fork 之间已知只有一个差异点：
-
-- fork 中有一处 `hf_model_download.py` 的 SOCKS 代理兼容补丁
-- 这个补丁没有被直接复制进 `docling-skill`
-
-详情见 [UPSTREAM_GAPS.md](UPSTREAM_GAPS.md)。
+使用 SOCKS 代理的环境应安装 `proxy` extra，让官方 `docling` 及其下载依赖可以直接处理 SOCKS 代理 URL，而不是 patch 上游代码。

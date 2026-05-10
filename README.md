@@ -45,11 +45,10 @@ pip install "git+https://github.com/realraelrr/docling-skill.git@v0.1.0"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
-If your runtime uses SOCKS proxies, prefer:
+If your runtime uses SOCKS proxies, install the proxy extra:
 
 ```bash
-pip install "git+https://github.com/realraelrr/docling-skill.git@v0.1.0"
-pip install socksio
+pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v0.1.0"
 ```
 
 For local development:
@@ -57,7 +56,7 @@ For local development:
 ```bash
 git clone https://github.com/realraelrr/docling-skill.git
 cd docling-skill
-pip install -e .
+pip install -e ".[proxy]"
 ```
 
 ## Homepage Example
@@ -232,9 +231,4 @@ OCR flags are mainly relevant for PDF inputs. Text-native formats such as DOCX, 
 
 Docling itself supports many more formats. Those broader upstream capabilities remain out of scope for this workflow phase unless they are explicitly added to the local `source.*` contract here.
 
-There is currently one known gap between this package and the `pdf-ingest` working fork:
-
-- the fork contains a shared-layer SOCKS proxy compatibility patch in `hf_model_download.py`
-- that patch is not copied into `docling-skill`
-
-See [UPSTREAM_GAPS.md](UPSTREAM_GAPS.md) for the current migration note.
+SOCKS proxy environments should install the `proxy` extra so official `docling` and its download dependencies can use SOCKS proxy URLs without patching upstream code.
