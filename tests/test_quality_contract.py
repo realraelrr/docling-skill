@@ -205,6 +205,36 @@ def test_extract_spreadsheet_metadata_counts_sheets_tables_and_merged_cells():
     }
 
 
+def test_extract_spreadsheet_metadata_only_includes_normalized_from_when_present():
+    structured_document = {
+        "pages": {"1": {}},
+        "tables": [
+            {
+                "data": {
+                    "table_cells": [
+                        {"text": "Region", "row_span": 1, "col_span": 1},
+                    ]
+                }
+            }
+        ],
+    }
+
+    xlsx_metadata = _extract_spreadsheet_metadata(
+        structured_document,
+        source_format="xlsx",
+    )
+    xls_metadata = _extract_spreadsheet_metadata(
+        structured_document,
+        source_format="xls",
+        normalized_from="xls",
+    )
+
+    assert xlsx_metadata["source_format"] == "xlsx"
+    assert "normalized_from" not in xlsx_metadata
+    assert xls_metadata["source_format"] == "xls"
+    assert xls_metadata["normalized_from"] == "xls"
+
+
 def test_build_source_meta_limits_fields_to_ingestion_metadata():
     manifest = {
         "pipeline_family": "simple",

@@ -30,40 +30,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .core import (
-    AttemptArtifacts,
-    PageArtifacts,
-    _assess_agent_quality,
-    _assess_page_qualities,
-    _build_ocr_remediation_config,
-    _build_ocr_options,
-    _build_page_remediation_plan,
-    _build_remediation_plan,
-    _compute_line_structure_signal,
-    _compute_ocr_noise_ratio,
-    _compute_table_fragment_signal,
-    _finalize_selected_manifest,
-    _merge_page_attempts,
-    _pick_better_attempt,
-    convert_document_to_ingestion_outputs,
-    convert_pdf_to_sidecar_outputs,
-)
+from .core import convert_document_to_ingestion_outputs, convert_pdf_to_sidecar_outputs
 
 __all__ = [
-    "AttemptArtifacts",
-    "PageArtifacts",
-    "_assess_agent_quality",
-    "_assess_page_qualities",
-    "_build_ocr_options",
-    "_build_ocr_remediation_config",
-    "_build_page_remediation_plan",
-    "_build_remediation_plan",
-    "_compute_ocr_noise_ratio",
-    "_compute_line_structure_signal",
-    "_compute_table_fragment_signal",
-    "_finalize_selected_manifest",
-    "_merge_page_attempts",
-    "_pick_better_attempt",
     "convert_document_to_ingestion_outputs",
     "convert_pdf_to_sidecar_outputs",
     "main",

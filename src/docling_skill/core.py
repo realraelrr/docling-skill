@@ -2,138 +2,68 @@
 
 from __future__ import annotations
 
-import base64
 import json
-import re
 import sys
 import tempfile
 from copy import deepcopy
-from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 from docling.document_converter import (
-    CsvFormatOption,
     DocumentConverter,
-    ExcelFormatOption,
     PdfFormatOption,
 )
 from docling.datamodel.base_models import ConversionStatus, InputFormat
 from docling.datamodel.pipeline_options import (
-    OcrAutoOptions,
-    OcrMacOptions,
     PdfPipelineOptions,
-    RapidOcrOptions,
-    TesseractCliOcrOptions,
 )
-from docling_core.types.doc import ImageRefMode, PictureItem
+from docling_core.types.doc import ImageRefMode
 from docling_core.types.doc.document import DoclingDocument
 from docling_core.types.legacy_doc.base import Ref
 from docling_core.utils.legacy import docling_document_to_legacy
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-IMAGE_PLACEHOLDER = "<!-- image -->"
-IMAGE_TOKEN_PATTERN = re.compile(r"\[\[image:[^\]]+\]\]")
-MARKDOWN_PREFIX_PATTERN = re.compile(r"^(#{1,6}\s+|[-*+]\s+|\d+\.\s+)")
-TOKEN_PATTERN = re.compile(r"[^\s]+")
-SOURCE_MARKDOWN_NAME = "source.md"
-SOURCE_DOCLING_JSON_NAME = "source.docling.json"
-SOURCE_IMAGES_NAME = "source.images.json"
-SOURCE_MANIFEST_NAME = "source.manifest.json"
-SOURCE_META_NAME = "source.meta.json"
-AVAILABLE_ARTIFACTS = [
-    SOURCE_MARKDOWN_NAME,
+from . import artifacts as _artifact_helpers
+from . import manifest as _manifest_helpers
+from . import ocr as _ocr_helpers
+from . import quality as _quality_helpers
+from . import spreadsheet as _spreadsheet_helpers
+# Keep moved names importable from docling_skill.core for compatibility.
+from .constants import (
+    AUTHORITATIVE_ARTIFACT,
+    AVAILABLE_ARTIFACTS,
+    IMAGE_TOKEN_PATTERN,
+    IMAGE_PLACEHOLDER,
+    INPUT_TYPE_BY_SUFFIX,
+    MARKDOWN_PREFIX_PATTERN,
+    MAX_OCR_NOISE_RATIO,
+    MAX_TABLE_FRAGMENT_SIGNAL,
+    MIN_AGENT_PAGE_TEXT_CHARACTERS,
+    MIN_AGENT_TEXT_CHARACTERS,
+    MIN_LINE_STRUCTURE_SIGNAL,
+    OCRMAC_LANGUAGE_ALIASES,
+    PREFERRED_AGENT_ARTIFACT,
+    PROJECT_ROOT,
     SOURCE_DOCLING_JSON_NAME,
     SOURCE_IMAGES_NAME,
-]
-PREFERRED_AGENT_ARTIFACT = SOURCE_MARKDOWN_NAME
-AUTHORITATIVE_ARTIFACT = SOURCE_DOCLING_JSON_NAME
-MIN_AGENT_TEXT_CHARACTERS = 120
-MIN_AGENT_PAGE_TEXT_CHARACTERS = 40
-MAX_OCR_NOISE_RATIO = 0.25
-MIN_LINE_STRUCTURE_SIGNAL = 0.35
-MAX_TABLE_FRAGMENT_SIGNAL = 0.45
-OCRMAC_LANGUAGE_ALIASES = {
-    "zh-CN": "zh-Hans",
-    "zh-SG": "zh-Hans",
-    "zh-TW": "zh-Hant",
-    "zh-HK": "zh-Hant",
-    "en": "en-US",
-}
-INPUT_TYPE_BY_SUFFIX = {
-    ".pdf": "pdf",
-    ".docx": "docx",
-    ".pptx": "pptx",
-    ".xls": "xls",
-    ".xlsx": "xlsx",
-    ".xlsm": "xlsm",
-    ".csv": "csv",
-    ".html": "html",
-    ".htm": "html",
-    ".txt": "txt",
-    ".md": "md",
-    ".tex": "latex",
-    ".vtt": "webvtt",
-    ".wav": "wav",
-    ".mp3": "mp3",
-    ".png": "image",
-    ".jpg": "image",
-    ".jpeg": "image",
-    ".gif": "image",
-    ".webp": "image",
-}
-TEXT_NATIVE_INPUT_TYPES = {"docx", "html", "txt", "md"}
-TEXT_NATIVE_INPUT_FORMATS = {
-    "docx": InputFormat.DOCX,
-    "html": InputFormat.HTML,
-    "txt": InputFormat.MD,
-    "md": InputFormat.MD,
-}
-SPREADSHEET_INPUT_TYPES = {"xlsx", "csv", "xls"}
-SPREADSHEET_INPUT_FORMATS = {
-    "xlsx": InputFormat.XLSX,
-    "csv": InputFormat.CSV,
-}
-
-ImageSidecar = dict[str, Any]
-QualityReport = dict[str, Any]
-
-
-@dataclass
-class PageArtifacts:
-    markdown_text: str
-    images: list[ImageSidecar]
-    quality: QualityReport
-    structured_document: dict[str, Any] | None = None
-
-
-@dataclass
-class AttemptArtifacts:
-    markdown_text: str
-    images: list[ImageSidecar]
-    page_outputs: dict[int, PageArtifacts]
-    structured_document: dict[str, Any]
-    manifest: dict[str, Any]
-
-
-def _compact_character_count(text: str) -> int:
-    return len(re.sub(r"\s+", "", text))
+    SOURCE_MANIFEST_NAME,
+    SOURCE_MARKDOWN_NAME,
+    SOURCE_META_NAME,
+    SPREADSHEET_INPUT_FORMATS,
+    SPREADSHEET_INPUT_TYPES,
+    TOKEN_PATTERN,
+    TEXT_NATIVE_INPUT_FORMATS,
+    TEXT_NATIVE_INPUT_TYPES,
+)
+from .models import AttemptArtifacts, ImageSidecar, PageArtifacts, QualityReport
+from .routing import detect_input_type as _detect_input_type
 
 
 def detect_input_type(input_path: Path) -> str:
-    return INPUT_TYPE_BY_SUFFIX.get(input_path.suffix.lower(), "document")
+    return _detect_input_type(input_path)
 
 
 def infer_source_title(markdown_text: str, input_path: Path) -> str:
-    for raw_line in markdown_text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith("#"):
-            return re.sub(r"^#+\s*", "", line).strip() or input_path.stem
-        return line
-    return input_path.stem
+    return _manifest_helpers.infer_source_title(markdown_text, input_path)
 
 
 def build_source_meta(
@@ -144,121 +74,110 @@ def build_source_meta(
     job_id: str | None = None,
     source_title: str | None = None,
 ) -> dict[str, Any]:
-    normalized_input_path = Path(input_path)
-    quality = manifest["quality"]
-
-    return {
-        "job_id": job_id,
-        "input_type": manifest.get("input_type", detect_input_type(normalized_input_path)),
-        "source_title": source_title or infer_source_title(markdown_text, normalized_input_path),
-        "source_url": None,
-        "source_attachment": normalized_input_path.name,
-        "author": None,
-        "published_at": None,
-        "extractor": "docling",
-        "pipeline_family": manifest.get("pipeline_family"),
-        "quality_status": quality["status"],
-        "quality_reasons": quality["reasons"],
-        "char_count": len(markdown_text),
-    }
+    return _manifest_helpers.build_source_meta(
+        input_path=input_path,
+        manifest=manifest,
+        markdown_text=markdown_text,
+        job_id=job_id,
+        source_title=source_title,
+        detect_input_type_func=detect_input_type,
+        infer_source_title_func=infer_source_title,
+    )
 
 
 def _picture_id(page_no: int | None, index: int) -> str:
-    normalized_page_no = page_no if page_no is not None else 0
-    return f"picture-p{normalized_page_no}-{index}"
+    return _artifact_helpers._picture_id(page_no, index)
 
 
-def _encode_image_base64(picture_item: PictureItem, document: Any) -> tuple[str, str] | None:
-    image = picture_item.get_image(document)
-    if image is None:
-        return None
-
-    image_buffer = BytesIO()
-    image.save(image_buffer, format="PNG")
-    return "image/png", base64.b64encode(image_buffer.getvalue()).decode("utf-8")
+def _encode_image_base64(picture_item: Any, document: Any) -> tuple[str, str] | None:
+    return _artifact_helpers._encode_image_base64(picture_item, document)
 
 
 def _collect_picture_sidecars(document: Any) -> list[ImageSidecar]:
-    pictures: list[ImageSidecar] = []
-    picture_indices_by_page: dict[int, int] = {}
-
-    for item, _level in document.iterate_items(traverse_pictures=True):
-        if not isinstance(item, PictureItem):
-            continue
-
-        encoded = _encode_image_base64(item, document)
-        if encoded is None:
-            continue
-
-        mime_type, image_base64 = encoded
-        prov = item.prov[0] if item.prov else None
-        page_no = getattr(prov, "page_no", None)
-        page_index = picture_indices_by_page.get(page_no or 0, 0)
-        picture_indices_by_page[page_no or 0] = page_index + 1
-
-        picture_id = _picture_id(page_no, page_index)
-        placeholder = f"[[image:{picture_id}]]"
-
-        pictures.append(
-            {
-                "id": picture_id,
-                "placeholder": placeholder,
-                "self_ref": getattr(item, "self_ref", None),
-                "page_no": getattr(prov, "page_no", None),
-                "bbox": prov.bbox.model_dump() if prov and getattr(prov, "bbox", None) else None,
-                "caption_refs": [caption.cref for caption in item.captions],
-                "mime_type": mime_type,
-                "base64": image_base64,
-            }
-        )
-
-    return pictures
+    return _artifact_helpers._collect_picture_sidecars(
+        document,
+        encode_image_base64=_encode_image_base64,
+        picture_id_factory=_picture_id,
+    )
 
 
 def _group_pictures_by_page(
     pictures: list[ImageSidecar],
 ) -> dict[int, list[ImageSidecar]]:
-    pictures_by_page: dict[int, list[ImageSidecar]] = {}
-    for picture in pictures:
-        page_no = picture.get("page_no")
-        if page_no is None:
-            continue
-        pictures_by_page.setdefault(page_no, []).append(picture)
-    return pictures_by_page
+    return _artifact_helpers._group_pictures_by_page(pictures)
 
 
 def _inject_picture_placeholders(markdown_text: str, pictures: list[ImageSidecar]) -> str:
-    updated_markdown = markdown_text
+    return _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
 
-    for picture in pictures:
-        if IMAGE_PLACEHOLDER in updated_markdown:
-            updated_markdown = updated_markdown.replace(
-                IMAGE_PLACEHOLDER, picture["placeholder"], 1
-            )
-        else:
-            updated_markdown += f"\n\n{picture['placeholder']}\n"
 
-    return updated_markdown
+def _export_structured_document(document: Any) -> dict[str, Any]:
+    return _artifact_helpers._export_structured_document(document)
+
+
+def _serialize_page_quality(
+    page_outputs: dict[int, PageArtifacts],
+) -> dict[str, QualityReport]:
+    return _manifest_helpers._serialize_page_quality(page_outputs)
+
+
+def _apply_artifact_authority(manifest: dict[str, Any]) -> dict[str, Any]:
+    return _manifest_helpers._apply_artifact_authority(manifest)
+
+
+def _build_attempt_manifest(
+    pdf_path: Path,
+    *,
+    input_type: str,
+    pipeline_family: str,
+    attempt_label: str,
+    status: str,
+    images: list[ImageSidecar],
+    markdown_text: str,
+    ocr_metadata: dict[str, Any] | None,
+    quality: QualityReport,
+    page_outputs: dict[int, PageArtifacts],
+    page_count: int | None = None,
+    remediated_pages: list[int] | None = None,
+) -> dict[str, Any]:
+    return _manifest_helpers._build_attempt_manifest(
+        pdf_path,
+        input_type=input_type,
+        pipeline_family=pipeline_family,
+        attempt_label=attempt_label,
+        status=status,
+        images=images,
+        markdown_text=markdown_text,
+        ocr_metadata=ocr_metadata,
+        quality=quality,
+        page_outputs=page_outputs,
+        page_count=page_count,
+        remediated_pages=remediated_pages,
+        serialize_page_quality=_serialize_page_quality,
+        apply_artifact_authority=_apply_artifact_authority,
+    )
+
+
+def _finalize_selected_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    return _manifest_helpers._finalize_selected_manifest(
+        manifest,
+        apply_artifact_authority=_apply_artifact_authority,
+    )
 
 
 def _normalize_ocr_languages(ocr_languages: list[str]) -> list[str]:
-    normalized: list[str] = []
-    for language in ocr_languages:
-        for token in language.split(","):
-            token = token.strip()
-            if token:
-                normalized.append(token)
-    return normalized
+    return _ocr_helpers._normalize_ocr_languages(ocr_languages)
 
 
 def _normalize_engine_languages(
     ocr_engine: str,
     ocr_languages: list[str],
 ) -> list[str]:
-    normalized_languages = _normalize_ocr_languages(ocr_languages)
-    if ocr_engine != "ocrmac":
-        return normalized_languages
-    return [OCRMAC_LANGUAGE_ALIASES.get(language, language) for language in normalized_languages]
+    return _ocr_helpers._normalize_engine_languages(
+        ocr_engine,
+        ocr_languages,
+        normalize_ocr_languages=_normalize_ocr_languages,
+    )
 
 
 def _build_ocr_options(
@@ -266,29 +185,69 @@ def _build_ocr_options(
     ocr_languages: list[str],
     force_full_page_ocr: bool,
 ):
-    normalized_languages = _normalize_engine_languages(ocr_engine, ocr_languages)
-    engine = ocr_engine
+    return _ocr_helpers._build_ocr_options(
+        ocr_engine,
+        ocr_languages,
+        force_full_page_ocr,
+        normalize_engine_languages=_normalize_engine_languages,
+    )
 
-    if engine == "auto" and normalized_languages:
-        engine = "ocrmac" if any("-" in lang for lang in normalized_languages) else "tesseract"
 
-    if engine == "tesseract":
-        return TesseractCliOcrOptions(
-            lang=normalized_languages or ["eng"],
-            force_full_page_ocr=force_full_page_ocr,
-        )
-    if engine == "ocrmac":
-        return OcrMacOptions(
-            lang=normalized_languages or ["en-US"],
-            force_full_page_ocr=force_full_page_ocr,
-        )
-    if engine == "rapidocr":
-        return RapidOcrOptions(
-            lang=normalized_languages or ["english", "chinese"],
-            force_full_page_ocr=force_full_page_ocr,
-        )
+def _build_ocr_metadata(
+    *,
+    engine: str,
+    languages: list[str],
+    force_full_page_ocr: bool,
+    remediated_pages: list[int] | None = None,
+) -> dict[str, Any]:
+    return _ocr_helpers._build_ocr_metadata(
+        engine=engine,
+        languages=languages,
+        force_full_page_ocr=force_full_page_ocr,
+        remediated_pages=remediated_pages,
+    )
 
-    return OcrAutoOptions(force_full_page_ocr=force_full_page_ocr)
+
+def _build_remediation_plan(
+    ocr_engine: str,
+    ocr_languages: list[str],
+    primary_quality: dict[str, Any],
+    *,
+    force_full_page_ocr: bool = False,
+) -> dict[str, Any] | None:
+    return _ocr_helpers._build_remediation_plan(
+        ocr_engine,
+        ocr_languages,
+        primary_quality,
+        force_full_page_ocr=force_full_page_ocr,
+        build_ocr_remediation_config=_build_ocr_remediation_config,
+    )
+
+
+def _build_ocr_remediation_config(
+    ocr_engine: str,
+    ocr_languages: list[str],
+    *,
+    force_full_page_ocr: bool = False,
+) -> dict[str, Any] | None:
+    return _ocr_helpers._build_ocr_remediation_config(
+        ocr_engine,
+        ocr_languages,
+        force_full_page_ocr=force_full_page_ocr,
+        normalize_engine_languages=_normalize_engine_languages,
+    )
+
+
+def _build_page_remediation_plan(page_quality: dict[int, QualityReport]) -> list[int]:
+    return _ocr_helpers._build_page_remediation_plan(page_quality)
+
+
+def _compact_character_count(text: str) -> int:
+    return _quality_helpers._compact_character_count(text)
+
+
+def _strip_image_tokens(markdown_text: str) -> str:
+    return _quality_helpers._strip_image_tokens(markdown_text)
 
 
 def _assess_agent_quality(
@@ -297,42 +256,15 @@ def _assess_agent_quality(
     page_count: int,
     min_required_text: int | None = None,
 ) -> dict[str, Any]:
-    placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
-    text_without_placeholders = _strip_image_tokens(markdown_text)
-    non_placeholder_characters = _compact_character_count(text_without_placeholders)
-    required_text = (
-        min_required_text
-        if min_required_text is not None
-        else max(MIN_AGENT_TEXT_CHARACTERS, page_count * 20)
+    return _quality_helpers._assess_agent_quality(
+        markdown_text,
+        pictures,
+        page_count,
+        min_required_text=min_required_text,
+        strip_image_tokens=_strip_image_tokens,
+        compact_character_count=_compact_character_count,
+        compute_content_trust_signals=_compute_content_trust_signals,
     )
-    content_trust = _compute_content_trust_signals(text_without_placeholders)
-
-    reasons: list[str] = []
-    if non_placeholder_characters < required_text:
-        reasons.append("low_text_content")
-    if placeholder_count > 0 and non_placeholder_characters == 0:
-        reasons.append("image_only_output")
-    if non_placeholder_characters >= required_text:
-        if content_trust["ocr_noise_ratio"] >= MAX_OCR_NOISE_RATIO:
-            reasons.append("high_ocr_noise")
-        if (
-            content_trust["line_structure_signal"] < MIN_LINE_STRUCTURE_SIGNAL
-            and content_trust["table_fragment_signal"] >= MAX_TABLE_FRAGMENT_SIGNAL
-        ):
-            reasons.append("fragmented_layout")
-
-    status = "good" if not reasons else "failed_for_agent"
-
-    return {
-        "status": status,
-        "agent_ready": status == "good",
-        "reasons": reasons,
-        "placeholder_count": placeholder_count,
-        "non_placeholder_characters": non_placeholder_characters,
-        "min_required_text_characters": required_text,
-        "picture_count": len(pictures),
-        "content_trust": content_trust,
-    }
 
 
 def _assess_text_native_quality(
@@ -340,44 +272,17 @@ def _assess_text_native_quality(
     pictures: list[ImageSidecar],
     input_type: str,
 ) -> dict[str, Any]:
-    placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
-    text_without_placeholders = _strip_image_tokens(markdown_text)
-    non_placeholder_characters = _compact_character_count(text_without_placeholders)
-    structure_signals = _compute_text_native_structure_signals(
-        text_without_placeholders,
-        input_type=input_type,
-    )
-
-    reasons: list[str] = []
-    if non_placeholder_characters < _min_text_native_characters(
+    return _quality_helpers._assess_text_native_quality(
+        markdown_text,
+        pictures,
         input_type,
-        structure_signals=structure_signals,
-    ):
-        reasons.append("low_text_content")
-    if placeholder_count > 0 and non_placeholder_characters == 0:
-        reasons.append("image_only_output")
-    if (
-        non_placeholder_characters
-        >= _min_text_native_characters(input_type, structure_signals=structure_signals)
-        and not _has_text_native_body_survival(input_type, structure_signals)
-    ):
-        reasons.append("missing_body_structure")
-
-    status = "good" if not reasons else "failed_for_agent"
-
-    return {
-        "status": status,
-        "agent_ready": status == "good",
-        "reasons": reasons,
-        "placeholder_count": placeholder_count,
-        "non_placeholder_characters": non_placeholder_characters,
-        "min_required_text_characters": _min_text_native_characters(
-            input_type,
-            structure_signals=structure_signals,
-        ),
-        "picture_count": len(pictures),
-        "content_trust": _compute_content_trust_signals(text_without_placeholders),
-    }
+        strip_image_tokens=_strip_image_tokens,
+        compact_character_count=_compact_character_count,
+        compute_text_native_structure_signals=_compute_text_native_structure_signals,
+        min_text_native_characters=_min_text_native_characters,
+        has_text_native_body_survival=_has_text_native_body_survival,
+        compute_content_trust_signals=_compute_content_trust_signals,
+    )
 
 
 def _assess_spreadsheet_quality(
@@ -385,52 +290,147 @@ def _assess_spreadsheet_quality(
     pictures: list[ImageSidecar],
     structured_document: dict[str, Any],
 ) -> dict[str, Any]:
-    placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
-    text_without_placeholders = _strip_image_tokens(markdown_text)
-    non_placeholder_characters = _compact_spreadsheet_markdown_character_count(
-        text_without_placeholders
+    return _quality_helpers._assess_spreadsheet_quality(
+        markdown_text,
+        pictures,
+        structured_document,
+        strip_image_tokens=_strip_image_tokens,
+        compact_spreadsheet_markdown_character_count=(
+            _compact_spreadsheet_markdown_character_count
+        ),
+        has_spreadsheet_table_content=_has_spreadsheet_table_content,
+        compute_content_trust_signals=_compute_content_trust_signals,
     )
-    has_table_structure = _has_spreadsheet_table_content(structured_document)
-
-    reasons: list[str] = []
-    if non_placeholder_characters == 0:
-        reasons.append("low_text_content")
-    if not has_table_structure:
-        reasons.append("low_table_content")
-    if placeholder_count > 0 and non_placeholder_characters == 0 and not has_table_structure:
-        reasons.append("image_only_output")
-
-    status = "good" if not reasons else "failed_for_agent"
-
-    return {
-        "status": status,
-        "agent_ready": status == "good",
-        "reasons": reasons,
-        "placeholder_count": placeholder_count,
-        "non_placeholder_characters": non_placeholder_characters,
-        "min_required_text_characters": 0,
-        "picture_count": len(pictures),
-        "content_trust": _compute_content_trust_signals(text_without_placeholders),
-    }
 
 
 def _compact_spreadsheet_markdown_character_count(markdown_text: str) -> int:
-    semantic_text = re.sub(r"[|\-:+\s]", "", markdown_text)
-    return len(semantic_text)
+    return _quality_helpers._compact_spreadsheet_markdown_character_count(markdown_text)
 
 
 def _has_spreadsheet_table_content(structured_document: dict[str, Any]) -> bool:
-    tables = structured_document.get("tables", [])
-    for table in tables:
-        if not isinstance(table, dict):
-            continue
-        data = table.get("data", {})
-        if not isinstance(data, dict):
-            continue
-        for cell in data.get("table_cells", []):
-            if isinstance(cell, dict) and _compact_character_count(str(cell.get("text", ""))) > 0:
-                return True
-    return False
+    return _quality_helpers._has_spreadsheet_table_content(
+        structured_document,
+        compact_character_count=_compact_character_count,
+    )
+
+
+def _min_text_native_characters(
+    input_type: str,
+    *,
+    structure_signals: dict[str, int | bool] | None = None,
+) -> int:
+    return _quality_helpers._min_text_native_characters(
+        input_type,
+        structure_signals=structure_signals,
+        min_concise_structured_body_characters=_min_concise_structured_body_characters,
+    )
+
+
+def _min_text_native_body_characters(input_type: str) -> int:
+    return _quality_helpers._min_text_native_body_characters(input_type)
+
+
+def _min_concise_structured_body_characters(input_type: str) -> int:
+    return _quality_helpers._min_concise_structured_body_characters(input_type)
+
+
+def _count_lexical_tokens(lines: list[str]) -> int:
+    return _quality_helpers._count_lexical_tokens(lines)
+
+
+def _strip_list_marker(line: str) -> str:
+    return _quality_helpers._strip_list_marker(line)
+
+
+def _compute_text_native_structure_signals(
+    markdown_text: str,
+    *,
+    input_type: str,
+) -> dict[str, int | bool]:
+    return _quality_helpers._compute_text_native_structure_signals(
+        markdown_text,
+        input_type=input_type,
+        compact_character_count=_compact_character_count,
+        count_lexical_tokens=_count_lexical_tokens,
+        strip_list_marker=_strip_list_marker,
+        min_text_native_body_characters=_min_text_native_body_characters,
+        min_concise_structured_body_characters=_min_concise_structured_body_characters,
+    )
+
+
+def _has_text_native_body_survival(
+    input_type: str,
+    structure_signals: dict[str, int | bool],
+) -> bool:
+    return _quality_helpers._has_text_native_body_survival(input_type, structure_signals)
+
+
+def _normalize_analysis_line(line: str) -> str:
+    return _quality_helpers._normalize_analysis_line(line)
+
+
+def _iter_content_lines(markdown_text: str) -> list[str]:
+    return _quality_helpers._iter_content_lines(
+        markdown_text,
+        normalize_analysis_line=_normalize_analysis_line,
+    )
+
+
+def _is_cjk_character(character: str) -> bool:
+    return _quality_helpers._is_cjk_character(character)
+
+
+def _compute_ocr_noise_ratio(markdown_text: str) -> float:
+    return _quality_helpers._compute_ocr_noise_ratio(
+        markdown_text,
+        is_suspicious_token=_is_suspicious_token,
+    )
+
+
+def _is_suspicious_token(token: str) -> bool:
+    return _quality_helpers._is_suspicious_token(
+        token,
+        is_cjk_character=_is_cjk_character,
+    )
+
+
+def _compute_line_structure_signal(markdown_text: str) -> float:
+    return _quality_helpers._compute_line_structure_signal(
+        markdown_text,
+        iter_content_lines=_iter_content_lines,
+        compact_character_count=_compact_character_count,
+        is_coherent_line=_is_coherent_line,
+    )
+
+
+def _is_coherent_line(line: str, line_length: int) -> bool:
+    return _quality_helpers._is_coherent_line(
+        line,
+        line_length,
+        is_cjk_character=_is_cjk_character,
+    )
+
+
+def _compute_table_fragment_signal(markdown_text: str) -> float:
+    return _quality_helpers._compute_table_fragment_signal(
+        markdown_text,
+        iter_content_lines=_iter_content_lines,
+        compact_character_count=_compact_character_count,
+        looks_like_fragmented_table_line=_looks_like_fragmented_table_line,
+    )
+
+
+def _looks_like_fragmented_table_line(line: str) -> bool:
+    return _quality_helpers._looks_like_fragmented_table_line(line)
+
+
+def _compute_content_trust_signals(markdown_text: str) -> dict[str, float]:
+    return _quality_helpers._compute_content_trust_signals(
+        markdown_text,
+        compute_ocr_noise_ratio=_compute_ocr_noise_ratio,
+        compute_line_structure_signal=_compute_line_structure_signal,
+        compute_table_fragment_signal=_compute_table_fragment_signal,
+    )
 
 
 def _extract_spreadsheet_metadata(
@@ -439,312 +439,32 @@ def _extract_spreadsheet_metadata(
     source_format: str | None = None,
     normalized_from: str | None = None,
 ) -> dict[str, Any]:
-    tables = structured_document.get("tables", [])
-    groups = structured_document.get("groups", [])
-    pages = structured_document.get("pages", {})
-    sheet_names = [
-        group.get("name")
-        for group in groups
-        if isinstance(group, dict)
-        and isinstance(group.get("name"), str)
-        and group["name"].startswith("sheet:")
-    ]
-    sheet_count = len(pages) if isinstance(pages, dict) else len(pages or [])
-    if sheet_count == 0:
-        sheet_count = len(sheet_names)
-    if sheet_count == 0 and tables:
-        sheet_count = 1
-
-    merged_cell_count = 0
-    for table in tables:
-        if not isinstance(table, dict):
-            continue
-        data = table.get("data", {})
-        if not isinstance(data, dict):
-            continue
-        for cell in data.get("table_cells", []):
-            if not isinstance(cell, dict):
-                continue
-            if cell.get("row_span", 1) > 1 or cell.get("col_span", 1) > 1:
-                merged_cell_count += 1
-
-    metadata = {
-        "sheet_count": sheet_count,
-        "table_count": len(tables),
-        "merged_cell_count": merged_cell_count,
-        "has_merged_cells": merged_cell_count > 0,
-        "has_multi_sheet": sheet_count > 1,
-    }
-    if source_format is not None:
-        metadata["source_format"] = source_format
-    if normalized_from is not None:
-        metadata["normalized_from"] = normalized_from
-    return metadata
-
-
-def _strip_image_tokens(markdown_text: str) -> str:
-    return IMAGE_TOKEN_PATTERN.sub("", markdown_text)
-
-
-def _min_text_native_characters(
-    input_type: str,
-    *,
-    structure_signals: dict[str, int | bool] | None = None,
-) -> int:
-    if input_type == "txt":
-        return 3
-    if (
-        structure_signals
-        and structure_signals["has_heading"]
-        and (
-            structure_signals["body_characters"] >= _min_concise_structured_body_characters(input_type)
-            or structure_signals["list_lexical_token_count"] >= 1
-        )
-    ):
-        return 5
-    return 8
-
-
-def _min_text_native_body_characters(input_type: str) -> int:
-    if input_type == "txt":
-        return 3
-    return 5
-
-
-def _min_concise_structured_body_characters(input_type: str) -> int:
-    if input_type == "txt":
-        return 3
-    return 2
-
-
-def _count_lexical_tokens(lines: list[str]) -> int:
-    return sum(
-        1
-        for line in lines
-        for token in TOKEN_PATTERN.findall(line)
-        if any(character.isalpha() for character in token)
+    return _spreadsheet_helpers._extract_spreadsheet_metadata(
+        structured_document,
+        source_format=source_format,
+        normalized_from=normalized_from,
     )
 
 
-def _strip_list_marker(line: str) -> str:
-    return re.sub(r"^([-*+]\s+|\d+\.\s+)", "", line).strip()
+def _spreadsheet_format_option(input_format: InputFormat):
+    return _spreadsheet_helpers._spreadsheet_format_option(input_format)
 
 
-def _compute_text_native_structure_signals(
-    markdown_text: str,
-    *,
-    input_type: str,
-) -> dict[str, int | bool]:
-    raw_lines = [line.rstrip() for line in markdown_text.splitlines()]
-    content_lines = [line.strip() for line in raw_lines if line.strip()]
-    heading_lines = [line for line in content_lines if re.match(r"^#{1,6}\s+\S", line)]
-    list_lines = [line for line in content_lines if re.match(r"^([-*+]\s+|\d+\.\s+)", line)]
-    body_lines = [
-        line for line in content_lines if line not in heading_lines and line not in list_lines
-    ]
-    body_characters = sum(_compact_character_count(line) for line in body_lines)
-    body_lexical_token_count = _count_lexical_tokens(body_lines)
-    list_lexical_token_count = _count_lexical_tokens(
-        [_strip_list_marker(line) for line in list_lines]
+def _safe_excel_sheet_title(title: str, fallback: str) -> str:
+    return _spreadsheet_helpers._safe_excel_sheet_title(title, fallback)
+
+
+def _xls_cell_value(book: Any, cell: Any) -> Any:
+    return _spreadsheet_helpers._xls_cell_value(book, cell)
+
+
+def _normalize_xls_to_xlsx(input_path: Path, output_path: Path) -> Path:
+    return _spreadsheet_helpers._normalize_xls_to_xlsx(
+        input_path,
+        output_path,
+        safe_excel_sheet_title=_safe_excel_sheet_title,
+        xls_cell_value=_xls_cell_value,
     )
-
-    return {
-        "has_heading": bool(heading_lines),
-        "has_list_markers": bool(list_lines),
-        "heading_count": len(heading_lines),
-        "list_item_count": len(list_lines),
-        "list_lexical_token_count": list_lexical_token_count,
-        "body_line_count": len(body_lines),
-        "body_characters": body_characters,
-        "body_lexical_token_count": body_lexical_token_count,
-        "paragraph_survival": bool(body_lines)
-        and (
-            body_characters >= _min_text_native_body_characters(input_type)
-            or (
-                bool(heading_lines)
-                and body_characters >= _min_concise_structured_body_characters(input_type)
-                and body_lexical_token_count >= 1
-            )
-        ),
-        "list_survival": list_lexical_token_count >= 1,
-    }
-
-
-def _has_text_native_body_survival(
-    input_type: str,
-    structure_signals: dict[str, int | bool],
-) -> bool:
-    if input_type == "txt":
-        return bool(
-            structure_signals["paragraph_survival"]
-            or (
-                structure_signals["has_list_markers"]
-                and structure_signals["list_survival"]
-            )
-            or structure_signals["body_characters"] >= 3
-        )
-
-    return bool(
-        structure_signals["paragraph_survival"]
-        or (
-            structure_signals["has_list_markers"]
-            and structure_signals["list_survival"]
-        )
-    )
-
-
-def _normalize_analysis_line(line: str) -> str:
-    return MARKDOWN_PREFIX_PATTERN.sub("", line.strip()).strip()
-
-
-def _iter_content_lines(markdown_text: str) -> list[str]:
-    return [
-        normalized
-        for raw_line in markdown_text.splitlines()
-        if (normalized := _normalize_analysis_line(raw_line))
-    ]
-
-
-def _is_cjk_character(character: str) -> bool:
-    return "\u4e00" <= character <= "\u9fff"
-
-
-def _compute_ocr_noise_ratio(markdown_text: str) -> float:
-    tokens = TOKEN_PATTERN.findall(markdown_text)
-    analyzable_tokens = [token for token in tokens if re.search(r"[A-Za-z0-9\u4e00-\u9fff]", token)]
-    if not analyzable_tokens:
-        return 0.0
-
-    suspicious_count = sum(1 for token in analyzable_tokens if _is_suspicious_token(token))
-    return suspicious_count / len(analyzable_tokens)
-
-
-def _is_suspicious_token(token: str) -> bool:
-    core = token.strip(".,;:!?()[]{}<>\"'`|/\\+-=_~")
-    if not core:
-        return False
-
-    letters = sum(character.isalpha() for character in core)
-    digits = sum(character.isdigit() for character in core)
-    cjk = sum(_is_cjk_character(character) for character in core)
-    punctuation = len(core) - letters - digits - cjk
-    latin_letters = [character for character in core if character.isalpha() and not _is_cjk_character(character)]
-    uppercase_count = sum(character.isupper() for character in latin_letters)
-    lowercase_count = sum(character.islower() for character in latin_letters)
-
-    if punctuation / len(core) > 0.3:
-        return True
-    if letters >= 5 and latin_letters:
-        uppercase_ratio = uppercase_count / len(latin_letters)
-        vowel_ratio = (
-            sum(character.lower() in "aeiou" for character in latin_letters) / len(latin_letters)
-        )
-        if uppercase_ratio >= 0.8:
-            return True
-        if len(latin_letters) >= 7 and vowel_ratio <= 0.2:
-            return True
-    if digits and letters and len(core) >= 6:
-        return True
-    if len(latin_letters) >= 3 and uppercase_count == len(latin_letters):
-        return True
-    if (
-        len(latin_letters) >= 3
-        and uppercase_count >= 2
-        and lowercase_count >= 1
-        and re.search(r"[A-Z]{2,}[a-z]|[a-z]+[A-Z]{2,}", core)
-    ):
-        return True
-    if len(latin_letters) <= 4 and uppercase_count >= 2 and lowercase_count == 1:
-        return True
-
-    return False
-
-
-def _compute_line_structure_signal(markdown_text: str) -> float:
-    content_lines = _iter_content_lines(markdown_text)
-    if not content_lines:
-        return 0.0
-
-    total_characters = 0
-    coherent_characters = 0
-    for line in content_lines:
-        line_length = _compact_character_count(line)
-        if line_length == 0:
-            continue
-        total_characters += line_length
-        if _is_coherent_line(line, line_length):
-            coherent_characters += line_length
-
-    if total_characters == 0:
-        return 0.0
-    return coherent_characters / total_characters
-
-
-def _is_coherent_line(line: str, line_length: int) -> bool:
-    word_count = len(line.split())
-    cjk_count = sum(_is_cjk_character(character) for character in line)
-    sentence_like_end = line.endswith((".", "。", "!", "！", "?", "？", ":", "：", ";", "；"))
-
-    return bool(
-        line_length >= 45
-        or word_count >= 8
-        or cjk_count >= 15
-        or (sentence_like_end and line_length >= 12)
-    )
-
-
-def _compute_table_fragment_signal(markdown_text: str) -> float:
-    content_lines = _iter_content_lines(markdown_text)
-    if not content_lines:
-        return 0.0
-
-    total_characters = 0
-    fragmented_characters = 0
-    for line in content_lines:
-        line_length = _compact_character_count(line)
-        if line_length == 0:
-            continue
-        total_characters += line_length
-        if _looks_like_fragmented_table_line(line):
-            fragmented_characters += line_length
-
-    if total_characters == 0:
-        return 0.0
-    return fragmented_characters / total_characters
-
-
-def _looks_like_fragmented_table_line(line: str) -> bool:
-    if "|" in line:
-        return True
-
-    tokens = [token for token in line.split() if token]
-    if len(tokens) < 4:
-        return False
-
-    numeric_tokens = sum(any(character.isdigit() for character in token) for token in tokens)
-    numeric_ratio = numeric_tokens / len(tokens)
-    average_token_length = sum(len(token) for token in tokens) / len(tokens)
-    sentence_like_end = line.endswith((".", "。", "!", "！", "?", "？"))
-
-    if (
-        numeric_tokens >= 2
-        and numeric_ratio >= 0.4
-        and average_token_length <= 4.5
-        and not sentence_like_end
-    ):
-        return True
-    if numeric_ratio >= 0.6 and not sentence_like_end:
-        return True
-
-    return False
-
-
-def _compute_content_trust_signals(markdown_text: str) -> dict[str, float]:
-    return {
-        "ocr_noise_ratio": _compute_ocr_noise_ratio(markdown_text),
-        "line_structure_signal": _compute_line_structure_signal(markdown_text),
-        "table_fragment_signal": _compute_table_fragment_signal(markdown_text),
-    }
 
 
 def _assess_page_qualities(
@@ -800,22 +520,6 @@ def _collect_page_outputs(
     }
 
 
-def _export_structured_document(document: Any) -> dict[str, Any]:
-    export_to_dict = getattr(document, "export_to_dict", None)
-    if callable(export_to_dict):
-        return export_to_dict()
-
-    model_dump = getattr(document, "model_dump", None)
-    if callable(model_dump):
-        return model_dump(mode="json")
-
-    dict_method = getattr(document, "dict", None)
-    if callable(dict_method):
-        return dict_method()
-
-    raise TypeError("Docling document does not expose a supported structured export method")
-
-
 def _export_page_markdown(result: Any) -> dict[int, str]:
     doc = docling_document_to_legacy(result.document)
     if doc.main_text is None:
@@ -851,80 +555,6 @@ def _export_page_markdown(result: Any) -> dict[int, str]:
         flush_page(current_page_no, start_ix, end_ix)
 
     return page_markdown
-
-
-def _serialize_page_quality(
-    page_outputs: dict[int, PageArtifacts],
-) -> dict[str, QualityReport]:
-    return {
-        str(page_no): page_output.quality
-        for page_no, page_output in sorted(page_outputs.items())
-    }
-
-
-def _apply_artifact_authority(manifest: dict[str, Any]) -> dict[str, Any]:
-    normalized_manifest = deepcopy(manifest)
-    normalized_manifest["preferred_agent_artifact"] = PREFERRED_AGENT_ARTIFACT
-    normalized_manifest["authoritative_artifact"] = AUTHORITATIVE_ARTIFACT
-    normalized_manifest["available_artifacts"] = list(AVAILABLE_ARTIFACTS)
-    return normalized_manifest
-
-
-def _build_attempt_manifest(
-    pdf_path: Path,
-    *,
-    input_type: str,
-    pipeline_family: str,
-    attempt_label: str,
-    status: str,
-    images: list[ImageSidecar],
-    markdown_text: str,
-    ocr_metadata: dict[str, Any] | None,
-    quality: QualityReport,
-    page_outputs: dict[int, PageArtifacts],
-    page_count: int | None = None,
-    remediated_pages: list[int] | None = None,
-) -> dict[str, Any]:
-    manifest = {
-        "source_file": str(pdf_path),
-        "input_type": input_type,
-        "pipeline_family": pipeline_family,
-        "attempt": attempt_label,
-        "status": status,
-        "page_count": page_count if page_count is not None else len(page_outputs),
-        "image_count": len(images),
-        "text_characters": len(markdown_text),
-        "document_markdown": SOURCE_MARKDOWN_NAME,
-        "images_json": SOURCE_IMAGES_NAME,
-        "quality": quality,
-        "page_quality": _serialize_page_quality(page_outputs),
-    }
-    if ocr_metadata is not None:
-        manifest["ocr"] = ocr_metadata
-    if remediated_pages:
-        manifest["remediated_pages"] = remediated_pages
-    return _apply_artifact_authority(manifest)
-
-
-def _build_ocr_metadata(
-    *,
-    engine: str,
-    languages: list[str],
-    force_full_page_ocr: bool,
-    remediated_pages: list[int] | None = None,
-) -> dict[str, Any]:
-    metadata = {
-        "enabled": True,
-        "engine": engine,
-        "languages": languages,
-        "force_full_page_ocr": force_full_page_ocr,
-    }
-    if remediated_pages:
-        metadata["page_level_remediation"] = {
-            "enabled": True,
-            "pages": remediated_pages,
-        }
-    return metadata
 
 
 def _assemble_attempt_from_pages(
@@ -980,52 +610,6 @@ def _assemble_attempt_from_pages(
         structured_document=deepcopy(structured_document),
         manifest=manifest,
     )
-
-
-def _build_remediation_plan(
-    ocr_engine: str,
-    ocr_languages: list[str],
-    primary_quality: dict[str, Any],
-    *,
-    force_full_page_ocr: bool = False,
-) -> dict[str, Any] | None:
-    if primary_quality.get("agent_ready"):
-        return None
-    return _build_ocr_remediation_config(
-        ocr_engine=ocr_engine,
-        ocr_languages=ocr_languages,
-        force_full_page_ocr=force_full_page_ocr,
-    )
-
-
-def _build_ocr_remediation_config(
-    ocr_engine: str,
-    ocr_languages: list[str],
-    *,
-    force_full_page_ocr: bool = False,
-) -> dict[str, Any] | None:
-    if force_full_page_ocr:
-        return None
-
-    remediation_engine = "tesseract" if ocr_engine in {"auto", "ocrmac"} else ocr_engine
-    remediation_languages = _normalize_engine_languages(remediation_engine, ocr_languages)
-    if not remediation_languages and remediation_engine == "tesseract":
-        remediation_languages = ["eng"]
-
-    return {
-        "attempt_label": "ocr_remediation",
-        "ocr_engine": remediation_engine,
-        "ocr_languages": remediation_languages,
-        "force_full_page_ocr": True,
-    }
-
-
-def _build_page_remediation_plan(page_quality: dict[int, QualityReport]) -> list[int]:
-    return [
-        page_no
-        for page_no, quality in sorted(page_quality.items())
-        if not quality.get("agent_ready", False)
-    ]
 
 
 def _merge_page_attempts(
@@ -1098,18 +682,6 @@ def _pick_better_attempt(
     ):
         return candidate_attempt
     return primary_attempt
-
-
-def _finalize_selected_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
-    finalized = _apply_artifact_authority(manifest)
-    quality = finalized["quality"]
-
-    if finalized.get("attempt") != "primary" and quality.get("agent_ready"):
-        quality["status"] = "salvaged"
-        if "ocr_remediation_selected" not in quality["reasons"]:
-            quality["reasons"] = [*quality["reasons"], "ocr_remediation_selected"]
-
-    return finalized
 
 
 def _manifest_page_quality(manifest: dict[str, Any]) -> dict[int, QualityReport]:
@@ -1342,79 +914,6 @@ def _convert_text_native_input(
         manifest=manifest,
     )
     return attempt, [attempt.manifest]
-
-
-def _spreadsheet_format_option(input_format: InputFormat):
-    if input_format == InputFormat.CSV:
-        return CsvFormatOption()
-    return ExcelFormatOption()
-
-
-def _safe_excel_sheet_title(title: str, fallback: str) -> str:
-    cleaned = re.sub(r"[\[\]:*?/\\]", " ", title).strip() or fallback
-    return cleaned[:31]
-
-
-def _xls_cell_value(book: Any, cell: Any) -> Any:
-    import xlrd
-
-    if cell.ctype in {xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK}:
-        return None
-    if cell.ctype == xlrd.XL_CELL_DATE:
-        return xlrd.xldate_as_datetime(cell.value, book.datemode)
-    if cell.ctype == xlrd.XL_CELL_BOOLEAN:
-        return bool(cell.value)
-    if cell.ctype == xlrd.XL_CELL_ERROR:
-        return xlrd.biffh.error_text_from_code.get(cell.value, f"#ERR{cell.value}")
-    return cell.value
-
-
-def _normalize_xls_to_xlsx(input_path: Path, output_path: Path) -> Path:
-    try:
-        import openpyxl
-        import xlrd
-    except ImportError as exc:
-        raise RuntimeError(
-            "XLS support requires xlrd and openpyxl. Save as .xlsx or .csv before ingestion."
-        ) from exc
-
-    try:
-        workbook = xlrd.open_workbook(str(input_path), formatting_info=True)
-    except Exception as exc:
-        raise RuntimeError(
-            "Unable to read XLS file. Save as .xlsx or .csv before ingestion."
-        ) from exc
-
-    normalized_workbook = openpyxl.Workbook()
-    normalized_workbook.remove(normalized_workbook.active)
-
-    for sheet_index, sheet in enumerate(workbook.sheets(), start=1):
-        worksheet = normalized_workbook.create_sheet(
-            title=_safe_excel_sheet_title(sheet.name, f"Sheet{sheet_index}")
-        )
-        for row_index in range(sheet.nrows):
-            for column_index in range(sheet.ncols):
-                value = _xls_cell_value(workbook, sheet.cell(row_index, column_index))
-                if value in {None, ""}:
-                    continue
-                worksheet.cell(
-                    row=row_index + 1,
-                    column=column_index + 1,
-                    value=value,
-                )
-        for row_start, row_end, column_start, column_end in sheet.merged_cells:
-            worksheet.merge_cells(
-                start_row=row_start + 1,
-                end_row=row_end,
-                start_column=column_start + 1,
-                end_column=column_end,
-            )
-
-    if not normalized_workbook.worksheets:
-        normalized_workbook.create_sheet(title="Sheet1")
-
-    normalized_workbook.save(output_path)
-    return output_path
 
 
 def _convert_spreadsheet_input(

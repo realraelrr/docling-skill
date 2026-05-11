@@ -133,12 +133,173 @@ def _quality_report(*, status: str = "good", agent_ready: bool = True) -> dict[s
 
 
 def test_cli_re_exports_core_entrypoints():
+    assert cli.__all__ == [
+        "convert_document_to_ingestion_outputs",
+        "convert_pdf_to_sidecar_outputs",
+        "main",
+    ]
     assert (
         cli.convert_document_to_ingestion_outputs
         is core.convert_document_to_ingestion_outputs
     )
     assert cli.convert_pdf_to_sidecar_outputs is core.convert_pdf_to_sidecar_outputs
     assert cli.main.__module__ == "docling_skill.cli"
+
+
+def test_core_facade_keeps_private_compatibility_exports():
+    expected_exports = [
+        "AttemptArtifacts",
+        "PageArtifacts",
+        "PROJECT_ROOT",
+        "_apply_artifact_authority",
+        "_assess_agent_quality",
+        "_assess_page_qualities",
+        "_assess_spreadsheet_quality",
+        "_assess_text_native_quality",
+        "_build_attempt_manifest",
+        "_build_ocr_options",
+        "_build_ocr_remediation_config",
+        "_build_page_remediation_plan",
+        "_build_remediation_plan",
+        "_collect_page_outputs",
+        "_collect_picture_sidecars",
+        "_compute_line_structure_signal",
+        "_compute_ocr_noise_ratio",
+        "_compute_table_fragment_signal",
+        "_convert_pdf_input",
+        "_convert_single_attempt",
+        "_convert_spreadsheet_input",
+        "_convert_text_native_input",
+        "_export_page_markdown",
+        "_export_structured_document",
+        "_extract_spreadsheet_metadata",
+        "_finalize_selected_manifest",
+        "_merge_page_attempts",
+        "_normalize_xls_to_xlsx",
+        "_remediate_pages",
+        "_select_remediation_plan",
+        "build_source_meta",
+        "detect_input_type",
+        "infer_source_title",
+    ]
+
+    missing_exports = [name for name in expected_exports if not hasattr(core, name)]
+
+    assert missing_exports == []
+
+
+def test_core_facade_wrappers_preserve_private_helper_monkeypatches(monkeypatch):
+    language_calls: list[tuple[str, list[str]]] = []
+
+    def fake_normalize_engine_languages(
+        ocr_engine: str,
+        ocr_languages: list[str],
+    ) -> list[str]:
+        language_calls.append((ocr_engine, ocr_languages))
+        return ["eng"]
+
+    monkeypatch.setattr(
+        core,
+        "_normalize_engine_languages",
+        fake_normalize_engine_languages,
+    )
+
+    core._build_ocr_options(
+        "tesseract",
+        ["raw"],
+        force_full_page_ocr=False,
+    )
+
+    assert language_calls == [("tesseract", ["raw"])]
+
+    authority_calls: list[str] = []
+
+    def fake_apply_artifact_authority(manifest: dict[str, object]) -> dict[str, object]:
+        authority_calls.append(str(manifest["attempt"]))
+        return {**manifest, "compat_marker": True}
+
+    monkeypatch.setattr(core, "_apply_artifact_authority", fake_apply_artifact_authority)
+
+    manifest = core._finalize_selected_manifest(
+        {
+            "attempt": "primary",
+            "quality": {
+                "status": "good",
+                "agent_ready": True,
+                "reasons": [],
+            },
+        }
+    )
+
+    assert authority_calls == ["primary"]
+    assert manifest["compat_marker"] is True
+
+    quality_calls: list[tuple[str, str]] = []
+
+    def fake_strip_image_tokens(markdown_text: str) -> str:
+        quality_calls.append(("strip", markdown_text))
+        return "patched semantic text"
+
+    def fake_content_trust(markdown_text: str) -> dict[str, float]:
+        quality_calls.append(("trust", markdown_text))
+        return {
+            "ocr_noise_ratio": 0.0,
+            "line_structure_signal": 1.0,
+            "table_fragment_signal": 0.0,
+        }
+
+    monkeypatch.setattr(core, "_strip_image_tokens", fake_strip_image_tokens)
+    monkeypatch.setattr(core, "_compute_content_trust_signals", fake_content_trust)
+
+    quality = core._assess_agent_quality(
+        markdown_text="[[image:picture-0]] raw",
+        pictures=[],
+        page_count=1,
+        min_required_text=1,
+    )
+
+    assert quality_calls == [
+        ("strip", "[[image:picture-0]] raw"),
+        ("trust", "patched semantic text"),
+    ]
+    assert quality["status"] == "good"
+
+    spreadsheet_calls: list[str] = []
+
+    def fake_safe_excel_sheet_title(title: str, fallback: str) -> str:
+        spreadsheet_calls.append(f"title:{title}:{fallback}")
+        return "patched-title"
+
+    def fake_xls_cell_value(book: object, cell: object) -> object:
+        spreadsheet_calls.append("cell")
+        return "patched-cell"
+
+    def fake_normalize_xls_to_xlsx(
+        input_path: Path,
+        output_path: Path,
+        *,
+        safe_excel_sheet_title,
+        xls_cell_value,
+    ) -> Path:
+        safe_excel_sheet_title("Unsafe/Name", "Sheet1")
+        xls_cell_value(object(), object())
+        return output_path
+
+    monkeypatch.setattr(core, "_safe_excel_sheet_title", fake_safe_excel_sheet_title)
+    monkeypatch.setattr(core, "_xls_cell_value", fake_xls_cell_value)
+    monkeypatch.setattr(
+        core._spreadsheet_helpers,
+        "_normalize_xls_to_xlsx",
+        fake_normalize_xls_to_xlsx,
+    )
+
+    normalized_path = core._normalize_xls_to_xlsx(
+        Path("/tmp/source.xls"),
+        Path("/tmp/output.xlsx"),
+    )
+
+    assert normalized_path == Path("/tmp/output.xlsx")
+    assert spreadsheet_calls == ["title:Unsafe/Name:Sheet1", "cell"]
 
 
 def test_package_exposes_project_root_constant():
