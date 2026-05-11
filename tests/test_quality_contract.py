@@ -2,10 +2,12 @@ import json
 
 from docling_skill.core import (
     _assess_agent_quality,
+    _assess_spreadsheet_quality,
     _assess_text_native_quality,
     _compute_line_structure_signal,
     _compute_ocr_noise_ratio,
     _compute_table_fragment_signal,
+    _extract_spreadsheet_metadata,
     _export_structured_document,
     build_source_meta,
 )
@@ -101,6 +103,106 @@ def test_assess_text_native_quality_rejects_heading_only_docx_output():
     assert quality["status"] == "failed_for_agent"
     assert quality["agent_ready"] is False
     assert "missing_body_structure" in quality["reasons"]
+
+
+def test_assess_spreadsheet_quality_rejects_structured_table_without_markdown_preview():
+    structured_document = {
+        "tables": [
+            {
+                "data": {
+                    "table_cells": [
+                        {
+                            "text": "Revenue",
+                            "row_span": 1,
+                            "col_span": 1,
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+
+    quality = _assess_spreadsheet_quality(
+        markdown_text="",
+        pictures=[],
+        structured_document=structured_document,
+    )
+
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert "low_text_content" in quality["reasons"]
+
+
+def test_assess_spreadsheet_quality_rejects_empty_table_structure():
+    quality = _assess_spreadsheet_quality(
+        markdown_text="",
+        pictures=[],
+        structured_document={"tables": [{"data": {"table_cells": []}}]},
+    )
+
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert "low_table_content" in quality["reasons"]
+
+
+def test_assess_spreadsheet_quality_rejects_delimiter_only_csv_preview():
+    quality = _assess_spreadsheet_quality(
+        markdown_text=",\n,\n",
+        pictures=[],
+        structured_document={
+            "tables": [
+                {
+                    "data": {
+                        "table_cells": [
+                            {"text": ""},
+                            {"text": ""},
+                        ]
+                    }
+                }
+            ]
+        },
+    )
+
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert "low_table_content" in quality["reasons"]
+
+
+def test_extract_spreadsheet_metadata_counts_sheets_tables_and_merged_cells():
+    structured_document = {
+        "groups": [
+            {"name": "sheet: Revenue"},
+            {"name": "sheet: Nested"},
+        ],
+        "tables": [
+            {
+                "data": {
+                    "table_cells": [
+                        {"text": "FY2026 Revenue Plan", "row_span": 1, "col_span": 4},
+                        {"text": "Region", "row_span": 2, "col_span": 1},
+                        {"text": "North", "row_span": 1, "col_span": 1},
+                    ]
+                }
+            },
+            {
+                "data": {
+                    "table_cells": [
+                        {"text": "Department", "row_span": 1, "col_span": 1},
+                    ]
+                }
+            },
+        ],
+    }
+
+    metadata = _extract_spreadsheet_metadata(structured_document)
+
+    assert metadata == {
+        "sheet_count": 2,
+        "table_count": 2,
+        "merged_cell_count": 2,
+        "has_merged_cells": True,
+        "has_multi_sheet": True,
+    }
 
 
 def test_build_source_meta_limits_fields_to_ingestion_metadata():

@@ -6,13 +6,19 @@ import base64
 import json
 import re
 import sys
+import tempfile
 from copy import deepcopy
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.document_converter import (
+    CsvFormatOption,
+    DocumentConverter,
+    ExcelFormatOption,
+    PdfFormatOption,
+)
 from docling.datamodel.base_models import ConversionStatus, InputFormat
 from docling.datamodel.pipeline_options import (
     OcrAutoOptions,
@@ -59,7 +65,10 @@ INPUT_TYPE_BY_SUFFIX = {
     ".pdf": "pdf",
     ".docx": "docx",
     ".pptx": "pptx",
+    ".xls": "xls",
     ".xlsx": "xlsx",
+    ".xlsm": "xlsm",
+    ".csv": "csv",
     ".html": "html",
     ".htm": "html",
     ".txt": "txt",
@@ -80,6 +89,11 @@ TEXT_NATIVE_INPUT_FORMATS = {
     "html": InputFormat.HTML,
     "txt": InputFormat.MD,
     "md": InputFormat.MD,
+}
+SPREADSHEET_INPUT_TYPES = {"xlsx", "csv", "xls"}
+SPREADSHEET_INPUT_FORMATS = {
+    "xlsx": InputFormat.XLSX,
+    "csv": InputFormat.CSV,
 }
 
 ImageSidecar = dict[str, Any]
@@ -364,6 +378,108 @@ def _assess_text_native_quality(
         "picture_count": len(pictures),
         "content_trust": _compute_content_trust_signals(text_without_placeholders),
     }
+
+
+def _assess_spreadsheet_quality(
+    markdown_text: str,
+    pictures: list[ImageSidecar],
+    structured_document: dict[str, Any],
+) -> dict[str, Any]:
+    placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
+    text_without_placeholders = _strip_image_tokens(markdown_text)
+    non_placeholder_characters = _compact_spreadsheet_markdown_character_count(
+        text_without_placeholders
+    )
+    has_table_structure = _has_spreadsheet_table_content(structured_document)
+
+    reasons: list[str] = []
+    if non_placeholder_characters == 0:
+        reasons.append("low_text_content")
+    if not has_table_structure:
+        reasons.append("low_table_content")
+    if placeholder_count > 0 and non_placeholder_characters == 0 and not has_table_structure:
+        reasons.append("image_only_output")
+
+    status = "good" if not reasons else "failed_for_agent"
+
+    return {
+        "status": status,
+        "agent_ready": status == "good",
+        "reasons": reasons,
+        "placeholder_count": placeholder_count,
+        "non_placeholder_characters": non_placeholder_characters,
+        "min_required_text_characters": 0,
+        "picture_count": len(pictures),
+        "content_trust": _compute_content_trust_signals(text_without_placeholders),
+    }
+
+
+def _compact_spreadsheet_markdown_character_count(markdown_text: str) -> int:
+    semantic_text = re.sub(r"[|\-:+\s]", "", markdown_text)
+    return len(semantic_text)
+
+
+def _has_spreadsheet_table_content(structured_document: dict[str, Any]) -> bool:
+    tables = structured_document.get("tables", [])
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        data = table.get("data", {})
+        if not isinstance(data, dict):
+            continue
+        for cell in data.get("table_cells", []):
+            if isinstance(cell, dict) and _compact_character_count(str(cell.get("text", ""))) > 0:
+                return True
+    return False
+
+
+def _extract_spreadsheet_metadata(
+    structured_document: dict[str, Any],
+    *,
+    source_format: str | None = None,
+    normalized_from: str | None = None,
+) -> dict[str, Any]:
+    tables = structured_document.get("tables", [])
+    groups = structured_document.get("groups", [])
+    pages = structured_document.get("pages", {})
+    sheet_names = [
+        group.get("name")
+        for group in groups
+        if isinstance(group, dict)
+        and isinstance(group.get("name"), str)
+        and group["name"].startswith("sheet:")
+    ]
+    sheet_count = len(pages) if isinstance(pages, dict) else len(pages or [])
+    if sheet_count == 0:
+        sheet_count = len(sheet_names)
+    if sheet_count == 0 and tables:
+        sheet_count = 1
+
+    merged_cell_count = 0
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        data = table.get("data", {})
+        if not isinstance(data, dict):
+            continue
+        for cell in data.get("table_cells", []):
+            if not isinstance(cell, dict):
+                continue
+            if cell.get("row_span", 1) > 1 or cell.get("col_span", 1) > 1:
+                merged_cell_count += 1
+
+    metadata = {
+        "sheet_count": sheet_count,
+        "table_count": len(tables),
+        "merged_cell_count": merged_cell_count,
+        "has_merged_cells": merged_cell_count > 0,
+        "has_multi_sheet": sheet_count > 1,
+    }
+    if source_format is not None:
+        metadata["source_format"] = source_format
+    if normalized_from is not None:
+        metadata["normalized_from"] = normalized_from
+    return metadata
 
 
 def _strip_image_tokens(markdown_text: str) -> str:
@@ -714,7 +830,7 @@ def _export_page_markdown(result: Any) -> dict[int, str]:
     def flush_page(page_no: int, start: int, end: int) -> None:
         page_markdown[page_no] = doc.export_to_markdown(
             main_text_start=start,
-            main_text_stop=end,
+            main_text_stop=end + 1,
         )
 
     for ix, original_item in enumerate(doc.main_text):
@@ -1228,6 +1344,152 @@ def _convert_text_native_input(
     return attempt, [attempt.manifest]
 
 
+def _spreadsheet_format_option(input_format: InputFormat):
+    if input_format == InputFormat.CSV:
+        return CsvFormatOption()
+    return ExcelFormatOption()
+
+
+def _safe_excel_sheet_title(title: str, fallback: str) -> str:
+    cleaned = re.sub(r"[\[\]:*?/\\]", " ", title).strip() or fallback
+    return cleaned[:31]
+
+
+def _xls_cell_value(book: Any, cell: Any) -> Any:
+    import xlrd
+
+    if cell.ctype in {xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK}:
+        return None
+    if cell.ctype == xlrd.XL_CELL_DATE:
+        return xlrd.xldate_as_datetime(cell.value, book.datemode)
+    if cell.ctype == xlrd.XL_CELL_BOOLEAN:
+        return bool(cell.value)
+    if cell.ctype == xlrd.XL_CELL_ERROR:
+        return xlrd.biffh.error_text_from_code.get(cell.value, f"#ERR{cell.value}")
+    return cell.value
+
+
+def _normalize_xls_to_xlsx(input_path: Path, output_path: Path) -> Path:
+    try:
+        import openpyxl
+        import xlrd
+    except ImportError as exc:
+        raise RuntimeError(
+            "XLS support requires xlrd and openpyxl. Save as .xlsx or .csv before ingestion."
+        ) from exc
+
+    try:
+        workbook = xlrd.open_workbook(str(input_path), formatting_info=True)
+    except Exception as exc:
+        raise RuntimeError(
+            "Unable to read XLS file. Save as .xlsx or .csv before ingestion."
+        ) from exc
+
+    normalized_workbook = openpyxl.Workbook()
+    normalized_workbook.remove(normalized_workbook.active)
+
+    for sheet_index, sheet in enumerate(workbook.sheets(), start=1):
+        worksheet = normalized_workbook.create_sheet(
+            title=_safe_excel_sheet_title(sheet.name, f"Sheet{sheet_index}")
+        )
+        for row_index in range(sheet.nrows):
+            for column_index in range(sheet.ncols):
+                value = _xls_cell_value(workbook, sheet.cell(row_index, column_index))
+                if value in {None, ""}:
+                    continue
+                worksheet.cell(
+                    row=row_index + 1,
+                    column=column_index + 1,
+                    value=value,
+                )
+        for row_start, row_end, column_start, column_end in sheet.merged_cells:
+            worksheet.merge_cells(
+                start_row=row_start + 1,
+                end_row=row_end,
+                start_column=column_start + 1,
+                end_column=column_end,
+            )
+
+    if not normalized_workbook.worksheets:
+        normalized_workbook.create_sheet(title="Sheet1")
+
+    normalized_workbook.save(output_path)
+    return output_path
+
+
+def _convert_spreadsheet_input(
+    input_path: Path,
+    *,
+    input_type: str,
+) -> tuple[AttemptArtifacts, list[dict[str, Any]]]:
+    normalized_from = None
+    conversion_input_type = input_type
+    conversion_path = input_path
+    temp_dir: tempfile.TemporaryDirectory[str] | None = None
+
+    try:
+        if input_type == "xls":
+            temp_dir = tempfile.TemporaryDirectory()
+            normalized_from = "xls"
+            conversion_input_type = "xlsx"
+            conversion_path = _normalize_xls_to_xlsx(
+                input_path,
+                Path(temp_dir.name) / f"{input_path.stem}.xlsx",
+            )
+
+        input_format = SPREADSHEET_INPUT_FORMATS[conversion_input_type]
+        converter = DocumentConverter(
+            allowed_formats=[input_format],
+            format_options={
+                input_format: _spreadsheet_format_option(input_format),
+            },
+        )
+        result = converter.convert(str(conversion_path))
+        if result.status not in {ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS}:
+            raise RuntimeError(f"Conversion failed with status: {result.status}")
+
+        pictures = _collect_picture_sidecars(result.document)
+        markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
+        markdown_text = _inject_picture_placeholders(markdown_text, pictures)
+        structured_document = _export_structured_document(result.document)
+    finally:
+        if temp_dir is not None:
+            temp_dir.cleanup()
+
+    spreadsheet_metadata = _extract_spreadsheet_metadata(
+        structured_document,
+        source_format=input_type,
+        normalized_from=normalized_from,
+    )
+    quality = _assess_spreadsheet_quality(
+        markdown_text=markdown_text,
+        pictures=pictures,
+        structured_document=structured_document,
+    )
+    manifest = _build_attempt_manifest(
+        input_path,
+        input_type=input_type,
+        pipeline_family="spreadsheet",
+        attempt_label="primary",
+        status=result.status.value,
+        images=pictures,
+        markdown_text=markdown_text,
+        ocr_metadata=None,
+        quality=quality,
+        page_outputs={},
+        page_count=spreadsheet_metadata["sheet_count"],
+    )
+    manifest["spreadsheet"] = spreadsheet_metadata
+    attempt = AttemptArtifacts(
+        markdown_text=markdown_text,
+        images=pictures,
+        page_outputs={},
+        structured_document=structured_document,
+        manifest=manifest,
+    )
+    return attempt, [attempt.manifest]
+
+
 def _dispatch_conversion(
     input_path: Path,
     *,
@@ -1249,6 +1511,16 @@ def _dispatch_conversion(
         return _convert_text_native_input(
             input_path,
             input_type=input_type,
+        )
+    if input_type in SPREADSHEET_INPUT_TYPES:
+        return _convert_spreadsheet_input(
+            input_path,
+            input_type=input_type,
+        )
+    if input_type == "xlsm":
+        raise NotImplementedError(
+            "Unsupported macro-enabled spreadsheet for v1 ingestion contract: .xlsm. "
+            "Save as .xlsx or .csv before ingestion."
         )
     raise NotImplementedError(
         f"Unsupported input type for v1 ingestion contract: {input_path.suffix or '<no suffix>'}"

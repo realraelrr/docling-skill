@@ -4,6 +4,9 @@
 Supported local inputs:
 - pdf
 - docx
+- xls
+- xlsx
+- csv
 - html
 - txt
 - md
@@ -75,7 +78,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "input_path",
-        help="Local input artifact. Supported: pdf, docx, html, txt, md.",
+        help="Local input artifact. Supported: pdf, docx, xls, xlsx, csv, html, txt, md.",
     )
     parser.add_argument(
         "output_dir",

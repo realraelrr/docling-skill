@@ -1,6 +1,8 @@
 import json
+import tomllib
 from pathlib import Path
 
+import docling_skill
 import docling_skill.cli as cli
 import docling_skill.core as core
 from docling_core.types.doc import BoundingBox, CoordOrigin, Size
@@ -144,6 +146,13 @@ def test_package_exposes_project_root_constant():
 
     assert pyproject_path.exists()
     assert 'name = "docling-skill"' in pyproject_path.read_text(encoding="utf-8")
+
+
+def test_package_version_matches_pyproject():
+    pyproject_path = Path(core.PROJECT_ROOT / "pyproject.toml")
+    pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+
+    assert docling_skill.__version__ == pyproject["project"]["version"]
 
 
 def test_cli_accepts_input_path_argument():
@@ -418,3 +427,47 @@ def test_collect_page_outputs_does_not_export_per_page_structured_docs_eagerly(m
 
     assert page_outputs[1].structured_document is None
     assert page_outputs[2].structured_document is None
+
+
+def test_export_page_markdown_includes_last_item_on_each_page(monkeypatch):
+    class FakeProvenance:
+        def __init__(self, page: int):
+            self.page = page
+
+    class FakeItem:
+        def __init__(self, text: str, page: int):
+            self.text = text
+            self.prov = [FakeProvenance(page)]
+
+    class FakeLegacyDocument:
+        def __init__(self):
+            self.main_text = [
+                FakeItem("p1-a", 1),
+                FakeItem("p1-b", 1),
+                FakeItem("p2-a", 2),
+                FakeItem("p2-b", 2),
+            ]
+
+        def _resolve_ref(self, item):
+            return item
+
+        def export_to_markdown(self, *, main_text_start: int, main_text_stop: int) -> str:
+            return "\n".join(
+                item.text for item in self.main_text[main_text_start:main_text_stop]
+            )
+
+    class FakeResult:
+        document = object()
+
+    monkeypatch.setattr(
+        core,
+        "docling_document_to_legacy",
+        lambda document: FakeLegacyDocument(),
+    )
+
+    page_markdown = core._export_page_markdown(FakeResult())
+
+    assert page_markdown == {
+        1: "p1-a\np1-b",
+        2: "p2-a\np2-b",
+    }

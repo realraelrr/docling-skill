@@ -6,7 +6,7 @@
 
 ## What It Does
 
-Supported local inputs: `pdf`, `docx`, `html`, `txt`, and `md`.
+Supported local inputs: `pdf`, `docx`, `xls`, `xlsx`, `csv`, `html`, `txt`, and `md`.
 
 Each successful conversion writes:
 
@@ -30,14 +30,14 @@ Downstream rule:
 ## Install
 
 ```bash
-pip install "git+https://github.com/realraelrr/docling-skill.git@v0.1.2"
+pip install "git+https://github.com/realraelrr/docling-skill.git@v1.0.3"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
 If your environment uses SOCKS proxies:
 
 ```bash
-pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v0.1.2"
+pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v1.0.3"
 ```
 
 For local development:
@@ -139,6 +139,10 @@ Manifest fields that downstream systems normally care about:
 
 For text-native inputs, `good` means the converted Markdown still preserves usable body structure. It is not merely "Docling parsed the file" or "Markdown is non-empty." For `txt`, the gate is looser because plain text has less explicit structure.
 
+For `xls`, `xlsx`, and `csv`, `source.md` is a readable preview. Use `source.docling.json` as the required authoritative artifact when merged cells, multi-row headers, multiple sheets, table spans, or cell offsets matter. The manifest includes spreadsheet routing metadata such as source format, sheet, table, and merged-cell counts. `normalized_from` is conditional and appears only when a source format was normalized before ingestion, for example from `xls` to `xlsx`.
+
+Spreadsheet scope is intentionally 80/20. Regular `xls`, `xlsx`, and `csv` files are supported. Formula evaluation is not guaranteed; spreadsheets that depend on recalculation or contain stale cached formula values should be manually preprocessed into clean `xlsx` or `csv` before ingestion. Macro-enabled workbooks (`xlsm`), password-protected files, corrupt files, chart/image semantics, and unusually complex workbooks should also be manually preprocessed into clean `xlsx` or `csv` before ingestion.
+
 Image extraction is format-dependent. Embedded images in local PDFs are supported; other local formats may produce sidecars only when Docling exposes them. HTML and webpage image capture belongs to the fetcher/browser layer, not this ingestion step.
 
 ## Scope
@@ -147,7 +151,7 @@ Image extraction is format-dependent. Embedded images in local PDFs are supporte
 
 Docling supports more formats than this project exposes. New formats should only be added when they preserve the local `source.*` contract, quality gating, and tests.
 
-OCR remediation is mainly relevant for PDF inputs. DOCX, HTML, TXT, and Markdown usually do not need the PDF remediation path.
+OCR remediation is mainly relevant for PDF inputs. DOCX, XLS, XLSX, CSV, HTML, TXT, and Markdown usually do not need the PDF remediation path.
 
 ## Acknowledgements
 

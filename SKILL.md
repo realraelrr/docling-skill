@@ -1,6 +1,6 @@
 ---
 name: docling-skill
-description: Use when converting local documents with docling-skill into agent-ready sidecar outputs, especially PDF, DOCX, HTML, TXT, or Markdown inputs that need manifest-gated Markdown, structured Docling JSON, image sidecars, OCR remediation, or knowledge-base ingestion.
+description: Use when converting local documents with docling-skill into agent-ready sidecar outputs, especially PDF, DOCX, XLS, XLSX, CSV, HTML, TXT, or Markdown inputs that need manifest-gated Markdown, structured Docling JSON, image sidecars, OCR remediation, or knowledge-base ingestion.
 allowed-tools:
   - Bash
   - Read
@@ -49,7 +49,7 @@ Optional flags:
 
 ## Inputs
 - `input_path`: Absolute or repo-relative document path.
-  Supported local inputs: `pdf`, `docx`, `html`, `txt`, `md`.
+  Supported local inputs: `pdf`, `docx`, `xls`, `xlsx`, `csv`, `html`, `txt`, `md`.
 - `output_dir`: Directory where outputs should be written.
 
 ## Outputs
@@ -87,7 +87,7 @@ The extractor writes:
 - It emits `source.*` directly instead of `<stem>.*`.
 - It does not do chunking. Chunking belongs to the shared normalize stage after ingestion.
 - It does not emit knowledge-base semantic fields.
-- It currently accepts local `pdf`, `docx`, `html`, `txt`, and `md` inputs.
+- It currently accepts local `pdf`, `docx`, `xls`, `xlsx`, `csv`, `html`, `txt`, and `md` inputs.
 - It does not fetch remote URLs. Remote acquisition belongs to the fetcher/browser layer upstream.
 - This workflow phase emits `source.md`, `source.docling.json`, `source.images.json`, `source.manifest.json`, and `source.meta.json`.
 
@@ -141,6 +141,16 @@ Image handling notes:
 - Image extraction is not universal across all supported formats.
 - HTML and webpage image capture should be owned by the fetcher/browser layer, not this ingestion step.
 
+## Spreadsheets
+
+For `xls`, `xlsx`, and `csv` inputs:
+- Treat `source.md` as a readable preview.
+- Use `source.docling.json` as the required authoritative artifact when merged cells, multi-row headers, multiple sheets, table spans, or cell offsets matter.
+- Check `manifest["spreadsheet"]` for `source_format`, `sheet_count`, `table_count`, `merged_cell_count`, `has_merged_cells`, and `has_multi_sheet`. `normalized_from` is conditional and appears only when a source format was normalized before ingestion, for example from `xls` to `xlsx`.
+- Do not infer merged or nested table semantics from Markdown alone; Markdown may flatten or visually repeat merged values.
+- Formula evaluation is not guaranteed; spreadsheets that depend on recalculation or contain stale cached formula values should be manually preprocessed into clean `xlsx` or `csv` before ingestion.
+- Macro-enabled workbooks (`xlsm`), password-protected files, corrupt files, chart/image semantics, and unusually complex workbooks should be manually preprocessed into clean `xlsx` or `csv` before ingestion.
+
 Example listing command:
 
 ```bash
@@ -173,9 +183,9 @@ conda run -n docling python -m docling_skill.cli \
 
 ## Roadmap Note
 
-The current local workflow contract supports `pdf`, `docx`, `html`, `txt`, and `md`.
+The current local workflow contract supports `pdf`, `docx`, `xls`, `xlsx`, `csv`, `html`, `txt`, and `md`.
 
-OCR flags are mainly relevant for PDF inputs. Text-native formats such as DOCX, HTML, TXT, and Markdown typically do not need the PDF remediation path.
+OCR flags are mainly relevant for PDF inputs. Text-native formats such as DOCX, HTML, TXT, and Markdown, and spreadsheet formats such as XLS, XLSX, and CSV, typically do not need the PDF remediation path.
 
 Docling itself supports more formats upstream, but those remain out of scope for this workflow phase unless they are explicitly added to the local `source.*` contract here.
 

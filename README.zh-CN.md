@@ -6,7 +6,7 @@
 
 ## 它做什么
 
-当前支持的本地输入：`pdf`、`docx`、`html`、`txt`、`md`。
+当前支持的本地输入：`pdf`、`docx`、`xls`、`xlsx`、`csv`、`html`、`txt`、`md`。
 
 每次成功转换都会写出：
 
@@ -30,14 +30,14 @@
 ## 安装
 
 ```bash
-pip install "git+https://github.com/realraelrr/docling-skill.git@v0.1.2"
+pip install "git+https://github.com/realraelrr/docling-skill.git@v1.0.3"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
 如果运行环境使用 SOCKS 代理：
 
 ```bash
-pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v0.1.2"
+pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v1.0.3"
 ```
 
 本地开发：
@@ -139,6 +139,10 @@ conda run -n docling python -m pytest
 
 对 text-native 输入来说，`good` 表示转换后的 Markdown 仍保留可用正文结构，不只是“Docling 解析成功”或“Markdown 非空”。对 `txt`，门槛会更宽松，因为纯文本本来就缺少显式结构。
 
+对 `xls`、`xlsx`、`csv` 来说，`source.md` 是便于阅读的预览。遇到合并单元格、多级表头、多 sheet、表格跨度或单元格 offset 语义时，必须把 `source.docling.json` 作为权威结构化产物。manifest 会包含 source format、sheet、table、merged cell 等 spreadsheet 路由元数据。`normalized_from` 是条件字段，只会在源格式被 normalization 后出现，例如从 `xls` 规范化为 `xlsx`。
+
+Spreadsheet 范围刻意按 80/20 控制。常规 `xls`、`xlsx`、`csv` 支持 ingestion；公式计算不保证执行，依赖重新计算或包含陈旧公式缓存值的 spreadsheet 应先由人工预处理成干净的 `xlsx` 或 `csv` 再进入 ingestion。启用宏的 `xlsm`、密码保护文件、损坏文件、图表/图片语义和特别复杂的工作簿，也应先由人工预处理成干净的 `xlsx` 或 `csv` 再进入 ingestion。
+
 图片提取取决于格式。本地 PDF 的嵌入图片是支持的；其他本地格式只有在 Docling 暴露图片时才可能产出 sidecar。HTML / 网页图片抓取属于 fetcher / browser 层，不属于这个 ingestion 步骤。
 
 ## 范围
@@ -147,7 +151,7 @@ conda run -n docling python -m pytest
 
 Docling 支持的格式比本项目当前暴露的更多。新增格式时，必须先保证它能保留本地 `source.*` 契约、质量门禁和测试。
 
-OCR 补救主要对 PDF 输入有意义。DOCX、HTML、TXT、Markdown 通常不需要 PDF 那套补救路径。
+OCR 补救主要对 PDF 输入有意义。DOCX、XLS、XLSX、CSV、HTML、TXT、Markdown 通常不需要 PDF 那套补救路径。
 
 ## 致谢
 
