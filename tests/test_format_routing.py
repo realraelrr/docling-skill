@@ -267,12 +267,48 @@ def test_convert_document_routes_supported_spreadsheet_inputs_to_spreadsheet_pat
     assert outputs["meta"]["pipeline_family"] == "spreadsheet"
 
 
-def test_convert_document_rejects_deferred_input_types(tmp_path: Path):
-    with pytest.raises(NotImplementedError, match=r"\.pptx"):
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "slides.pptx",
+        "paper.tex",
+        "captions.vtt",
+        "audio.wav",
+        "audio.mp3",
+        "image.png",
+        "image.jpg",
+        "image.jpeg",
+        "image.gif",
+        "image.webp",
+    ],
+)
+def test_convert_document_rejects_deferred_input_types(tmp_path: Path, filename: str):
+    input_path = tmp_path / filename
+    expected_suffix_pattern = input_path.suffix.replace(".", r"\.")
+    with pytest.raises(NotImplementedError, match=expected_suffix_pattern):
         core.convert_document_to_ingestion_outputs(
-            input_path=tmp_path / "slides.pptx",
-            output_dir=tmp_path / "out-pptx",
+            input_path=input_path,
+            output_dir=tmp_path / f"out-{input_path.suffix.lstrip('.')}",
         )
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "slides.pptx",
+        "paper.tex",
+        "captions.vtt",
+        "audio.wav",
+        "audio.mp3",
+        "image.png",
+        "image.jpg",
+        "image.jpeg",
+        "image.gif",
+        "image.webp",
+    ],
+)
+def test_detect_input_type_keeps_deferred_formats_unrouted(filename: str):
+    assert core.detect_input_type(Path(filename)) == "document"
 
 
 def test_convert_document_rejects_xlsm_with_manual_preprocess_guidance(tmp_path: Path):

@@ -1,4 +1,0 @@
-interface:
-  display_name: "docling-skill"
-  short_description: "Convert local docs into agent sidecars"
-  default_prompt: "Use $docling-skill to convert this local document into source.* sidecar outputs in an explicit output directory."

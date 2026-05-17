@@ -1,27 +1,18 @@
 ---
 name: docling-skill
-description: Use when converting local documents with docling-skill into agent-ready sidecar outputs, especially PDF, DOCX, XLS, XLSX, CSV, HTML, TXT, or Markdown inputs that need manifest-gated Markdown, structured Docling JSON, image sidecars, OCR remediation, or knowledge-base ingestion.
-allowed-tools:
-  - Bash
-  - Read
-  - Write
-  - Glob
+description: Use when converting local documents with docling-skill into agent-ready source.* sidecar outputs, especially PDF, DOCX, XLS, XLSX, CSV, HTML, TXT, or Markdown inputs that need manifest-gated Markdown, structured Docling JSON, image sidecars, OCR remediation, or local document pre-ingestion for downstream knowledge-base workflows.
 ---
 
 # docling-skill
 
-## When to use
-- A document needs to be converted for agent consumption rather than ad hoc text extraction.
-- The caller needs Markdown, structured Docling JSON, image sidecars, and a quality manifest.
-- The source may be scanned, image-heavy, or likely to require OCR remediation, especially for PDF.
-- The user asks for document conversion, PDF extraction, PDF-to-Markdown, PDF analysis, or knowledge-base ingestion from a document.
+Convert local documents into a stable `source.*` sidecar set for agent consumption. Treat this skill as the ingestion layer, not as ad hoc text extraction.
 
 ## Preconditions
 - If you use the relative command, run from the `docling-skill` repo root.
 - Runtime: `conda` environment `docling`, or pip-installed `docling-skill` CLI.
 - Always provide an explicit output directory unless the user explicitly accepts `/tmp/docling-output`.
 
-## Canonical Command
+## Command
 
 Conda environment:
 
@@ -47,39 +38,31 @@ Optional flags:
 --no-ocr-remediation
 ```
 
-## Inputs
-- `input_path`: Absolute or repo-relative document path.
-  Supported local inputs: `pdf`, `docx`, `xls`, `xlsx`, `csv`, `html`, `txt`, `md`.
-- `output_dir`: Directory where outputs should be written.
+Inputs:
+
+- `input_path`: Absolute or repo-relative local document path. Supported inputs: `pdf`, `docx`, `xls`, `xlsx`, `csv`, `html`, `txt`, and `md`.
+- `output_dir`: Explicit directory where outputs should be written.
 
 ## Outputs
 The extractor writes:
+
 - `source.md`
 - `source.docling.json`
 - `source.images.json`
 - `source.manifest.json`
 - `source.meta.json`
 
-`source.md`
-- Main agent-readable text.
-- Images appear as placeholders like `[[image:picture-p3-0]]`.
+Use `source.manifest.json` before trusting any other output.
 
-`source.images.json`
-- One entry per extracted picture when image extraction is available for that input.
-- Includes `id`, `placeholder`, `page_no`, `bbox`, `mime_type`, and `base64`.
+Artifact roles:
 
-`source.docling.json`
-- Structured Docling document export from the same conversion result as `source.md`.
-- Agents should still read `source.md` first after the manifest check.
-- Use `source.docling.json` when a downstream system needs authoritative machine-readable structure, recovery, or deeper inspection beyond Markdown.
+- `source.manifest.json`: Quality, trust, routing, remediation, `preferred_agent_artifact`, `authoritative_artifact`, `available_artifacts`, and selected attempt metadata.
+- `source.md`: Default agent-readable Markdown. Image placeholders appear as `[[image:picture-p3-0]]`.
+- `source.docling.json`: Authoritative structured Docling export from the same conversion result as `source.md`; use for recovery, machine-readable structure, or deeper inspection.
+- `source.images.json`: Extracted image sidecars with `id`, `placeholder`, `page_no`, `bbox`, `mime_type`, and `base64` when image extraction is available.
+- `source.meta.json`: Ingestion metadata only: `job_id`, `input_type`, `source_title`, `source_url`, `source_attachment`, `author`, `published_at`, `extractor`, `pipeline_family`, `quality_status`, `quality_reasons`, and `char_count`.
 
-`source.manifest.json`
-- Includes `quality` (with nested `content_trust`), `preferred_agent_artifact`, `authoritative_artifact`, `available_artifacts`, `selected_attempt`, and `ocr_remediation_applied`.
-- Use this file to decide whether the result is safe to pass downstream.
-
-`source.meta.json`
-- Includes only ingestion metadata: `job_id`, `input_type`, `source_title`, `source_url`, `source_attachment`, `author`, `published_at`, `extractor`, `pipeline_family`, `quality_status`, `quality_reasons`, and `char_count`.
-- Do not put downstream knowledge fields like tags, keywords, category, or summary into this file.
+Do not add downstream knowledge fields such as tags, keywords, category, summary, or embeddings to `source.meta.json`.
 
 ## Workflow Boundary
 
@@ -87,20 +70,13 @@ The extractor writes:
 - It emits `source.*` directly instead of `<stem>.*`.
 - It does not do chunking. Chunking belongs to the shared normalize stage after ingestion.
 - It does not emit knowledge-base semantic fields.
-- It currently accepts local `pdf`, `docx`, `xls`, `xlsx`, `csv`, `html`, `txt`, and `md` inputs.
 - It does not fetch remote URLs. Remote acquisition belongs to the fetcher/browser layer upstream.
-- This workflow phase emits `source.md`, `source.docling.json`, `source.images.json`, `source.manifest.json`, and `source.meta.json`.
 
-## First Check
-Read `source.manifest.json` before consuming `source.md`.
-
-Example:
-
-```bash
-python3 -c 'import json, pathlib; p = pathlib.Path("PATH_TO_MANIFEST"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "agent_ready": m["quality"]["agent_ready"], "reasons": m["quality"]["reasons"], "selected_attempt": m["selected_attempt"], "ocr_remediation_applied": m["ocr_remediation_applied"]})'
-```
+## Manifest Check
+Read `source.manifest.json` before consuming `source.md`:
 
 Minimum fields to inspect:
+
 - `manifest["quality"]["status"]`
 - `manifest["quality"]["reasons"]`
 - `manifest["quality"]["content_trust"]`
@@ -109,10 +85,8 @@ Minimum fields to inspect:
 - `manifest["available_artifacts"]`
 - `manifest["selected_attempt"]`
 
-Minimal example:
-
 ```bash
-python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "reasons": m["quality"]["reasons"], "selected_attempt": m["selected_attempt"]})'
+python3 -c 'import json, pathlib; p = pathlib.Path("PATH_TO_MANIFEST"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "agent_ready": m["quality"]["agent_ready"], "reasons": m["quality"]["reasons"], "selected_attempt": m["selected_attempt"], "ocr_remediation_applied": m["ocr_remediation_applied"]})'
 ```
 
 ## Decision Flow
@@ -181,13 +155,17 @@ conda run -n docling python -m docling_skill.cli \
 - The output directory contains `source.md`, `source.docling.json`, `source.images.json`, `source.manifest.json`, and `source.meta.json`.
 - `source.manifest.json` has been checked explicitly before using `source.md`.
 
-## Roadmap Note
-
-The current local workflow contract supports `pdf`, `docx`, `xls`, `xlsx`, `csv`, `html`, `txt`, and `md`.
+## Scope
 
 OCR flags are mainly relevant for PDF inputs. Text-native formats such as DOCX, HTML, TXT, and Markdown, and spreadsheet formats such as XLS, XLSX, and CSV, typically do not need the PDF remediation path.
 
 Docling itself supports more formats upstream, but those remain out of scope for this workflow phase unless they are explicitly added to the local `source.*` contract here.
+
+## Integration
+- Root source: `SKILL.md`.
+- Codex entrypoint: `.codex/skills/docling-skill/SKILL.md` or `~/.codex/skills/docling-skill/SKILL.md`.
+- Claude Code entrypoint: `.claude/skills/docling-skill/SKILL.md` or `~/.claude/skills/docling-skill/SKILL.md`.
+- Prefer symlinks to this repo when installing the same source skill for both runtimes.
 
 ## Common Mistakes
 - Do not skip the manifest check.

@@ -15,7 +15,7 @@ Each successful conversion writes:
 | `source.manifest.json` | Quality, routing, remediation, and trust metadata |
 | `source.md` | Default agent-readable Markdown |
 | `source.docling.json` | Authoritative structured Docling export from the same conversion result |
-| `source.images.json` | Image sidecars with stable placeholders when extraction is available |
+| `source.images.json` | Always-written image sidecar list; empty when extraction is unavailable or no images are found |
 | `source.meta.json` | Lightweight ingestion metadata for downstream workflows |
 
 Downstream rule:
@@ -94,65 +94,53 @@ if not manifest["quality"]["agent_ready"]:
     raise RuntimeError(manifest["quality"])
 
 markdown_text = outputs["markdown_text"]
-docling_document = outputs["docling_document"]
+structured_document = outputs["docling_document"]
 images = outputs["images"]
 meta = outputs["meta"]
 ```
 
+## Skill Integration
+
+This repository supports both Codex and Claude Code from the same source skill.
+
+- Codex: `.codex/skills/docling-skill/SKILL.md`
+- Claude Code: `.claude/skills/docling-skill/SKILL.md`
+- Root source: `SKILL.md`
+
+For global installs, use the same target layout under the user's home directory:
+
+- Codex: `~/.codex/skills/docling-skill/SKILL.md`
+- Claude Code: `~/.claude/skills/docling-skill/SKILL.md`
+
 ## Agent Setup
-
-This repository supports both Codex and Claude Code from the same source skill:
-
-- Codex: `~/.codex/skills/docling-skill`
-- Claude Code: `~/.claude/skills/docling-skill`
 
 If you are Codex, Claude Code, or another LLM agent setting up this project from scratch:
 
 1. Treat this repository as the source of truth.
 2. Clone it into the user's local code workspace.
 3. Install it into the existing conda environment named `docling`, using the `proxy` extra when SOCKS proxies are configured.
-4. Point both agent skill paths at this repo, preferably with symlinks instead of copies.
-5. Validate both installed skill paths.
+4. Point both agent skill entrypoints at this repo's root `SKILL.md`, preferably with symlinks instead of copies.
+5. Validate the root skill and both installed skill paths with the validator available in the active runtime.
 6. Run the test suite.
 7. Do not commit `.state/` or other agent working files.
 
 Expected verification:
 
 ```bash
-python3 /Users/rael/.codex/skills/.system/skill-creator/scripts/quick_validate.py ~/.codex/skills/docling-skill
-python3 /Users/rael/.codex/skills/.system/skill-creator/scripts/quick_validate.py ~/.claude/skills/docling-skill
+# If the Codex skill validator is available:
+conda run -n docling python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" .
+conda run -n docling python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" .codex/skills/docling-skill
+conda run -n docling python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" .claude/skills/docling-skill
+
 conda run -n docling python -m pytest
 ```
-
-## Contract Notes
-
-Manifest fields that downstream systems normally care about:
-
-- `quality.status`: `good`, `salvaged`, or `failed_for_agent`
-- `quality.agent_ready`: whether the result is safe for default agent consumption
-- `quality.content_trust`: quality signals used for routing
-- `preferred_agent_artifact`: currently always `source.md`
-- `authoritative_artifact`: currently always `source.docling.json`
-- `available_artifacts`
-- `selected_attempt`
-- `ocr_remediation_applied`
-
-For text-native inputs, `good` means the converted Markdown still preserves usable body structure. It is not merely "Docling parsed the file" or "Markdown is non-empty." For `txt`, the gate is looser because plain text has less explicit structure.
-
-For `xls`, `xlsx`, and `csv`, `source.md` is a readable preview. Use `source.docling.json` as the required authoritative artifact when merged cells, multi-row headers, multiple sheets, table spans, or cell offsets matter. The manifest includes spreadsheet routing metadata such as source format, sheet, table, and merged-cell counts. `normalized_from` is conditional and appears only when a source format was normalized before ingestion, for example from `xls` to `xlsx`.
-
-Spreadsheet scope is intentionally 80/20. Regular `xls`, `xlsx`, and `csv` files are supported. Formula evaluation is not guaranteed; spreadsheets that depend on recalculation or contain stale cached formula values should be manually preprocessed into clean `xlsx` or `csv` before ingestion. Macro-enabled workbooks (`xlsm`), password-protected files, corrupt files, chart/image semantics, and unusually complex workbooks should also be manually preprocessed into clean `xlsx` or `csv` before ingestion.
-
-Image extraction is format-dependent. Embedded images in local PDFs are supported; other local formats may produce sidecars only when Docling exposes them. HTML and webpage image capture belongs to the fetcher/browser layer, not this ingestion step.
 
 ## Scope
 
 `docling-skill` is a thin workflow layer on top of official `docling`, not a Docling fork or official distribution.
 
-Docling supports more formats than this project exposes. New formats should only be added when they preserve the local `source.*` contract, quality gating, and tests.
-
-OCR remediation is mainly relevant for PDF inputs. DOCX, XLS, XLSX, CSV, HTML, TXT, and Markdown usually do not need the PDF remediation path.
+The skill workflow contract lives in [SKILL.md](SKILL.md). Docling supports more formats than this project exposes; new formats should only be added when they preserve the local `source.*` contract, quality gating, and tests.
 
 ## Acknowledgements
 
-Thanks to the Docling maintainers for the parser, document model, and format support this project builds on. If this repository helps your work, consider citing or acknowledging [Docling](https://github.com/docling-project/docling) as the upstream document AI toolkit.
+Built on top of [Docling](https://github.com/docling-project/docling), which provides the parser, document model, and format support.
