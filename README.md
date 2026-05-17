@@ -2,7 +2,7 @@
 
 `docling-skill` is a local, agent-first ingestion layer built on top of [Docling](https://github.com/docling-project/docling). It converts local documents into a stable `source.*` sidecar contract that LLM agents can inspect and consume safely.
 
-[中文说明](README.zh-CN.md)
+[中文 README](README.zh-CN.md)
 
 ## What It Does
 
