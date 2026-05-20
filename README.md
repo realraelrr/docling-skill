@@ -4,6 +4,11 @@
 
 [中文 README](README.zh-CN.md)
 
+Use it when an agent needs trustworthy local PDF, Office, HTML, text, or
+Markdown conversion before downstream reasoning, retrieval, wiki ingestion, or
+handoff. The key output is not just Markdown; it is an inspectable manifest that
+tells the agent whether the source is ready to trust.
+
 ## What It Does
 
 Supported local inputs: `pdf`, `docx`, `xls`, `xlsx`, `csv`, `html`, `txt`, and `md`.
