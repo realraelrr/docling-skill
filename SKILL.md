@@ -52,11 +52,11 @@ The extractor writes:
 - `source.manifest.json`
 - `source.meta.json`
 
-Use `source.manifest.json` before trusting any other output.
+Use `source.manifest.json` before consuming any other output.
 
 Artifact roles:
 
-- `source.manifest.json`: Quality, trust, routing, remediation, `preferred_agent_artifact`, `authoritative_artifact`, `available_artifacts`, and selected attempt metadata.
+- `source.manifest.json`: Quality risk, routing, remediation, `preferred_agent_artifact`, `authoritative_artifact`, `available_artifacts`, selected attempt metadata, and evidence signals.
 - `source.md`: Default agent-readable Markdown. Image placeholders appear as `[[image:picture-p3-0]]`.
 - `source.docling.json`: Authoritative structured Docling export from the same conversion result as `source.md`; use for recovery, machine-readable structure, or deeper inspection.
 - `source.images.json`: Extracted image sidecars with `id`, `placeholder`, `page_no`, `bbox`, `mime_type`, and `base64` when image extraction is available.
@@ -78,7 +78,10 @@ Read `source.manifest.json` before consuming `source.md`:
 Minimum fields to inspect:
 
 - `manifest["quality"]["status"]`
+- `manifest["quality"]["risk_level"]`
 - `manifest["quality"]["reasons"]`
+- `manifest["quality"]["warnings"]`
+- `manifest["quality"]["signals"]`
 - `manifest["quality"]["content_trust"]`
 - `manifest["preferred_agent_artifact"]`
 - `manifest["authoritative_artifact"]`
@@ -86,23 +89,27 @@ Minimum fields to inspect:
 - `manifest["selected_attempt"]`
 
 ```bash
-python3 -c 'import json, pathlib; p = pathlib.Path("PATH_TO_MANIFEST"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "agent_ready": m["quality"]["agent_ready"], "reasons": m["quality"]["reasons"], "selected_attempt": m["selected_attempt"], "ocr_remediation_applied": m["ocr_remediation_applied"]})'
+python3 -c 'import json, pathlib; p = pathlib.Path("PATH_TO_MANIFEST"); m = json.loads(p.read_text(encoding="utf-8")); q = m["quality"]; print({"status": q["status"], "risk_level": q["risk_level"], "agent_ready": q["agent_ready"], "reasons": q["reasons"], "warnings": q["warnings"], "selected_attempt": m["selected_attempt"], "ocr_remediation_applied": m["ocr_remediation_applied"]})'
 ```
 
 ## Decision Flow
 1. Resolve the input document path and an explicit output directory.
 2. Run the extractor.
-3. Read `source.manifest.json` before trusting `source.md`.
-4. Decide from `manifest["quality"]["status"]`:
-   - `good`: use `source.md` as the primary text artifact.
-   - `salvaged`: use `source.md`, but treat it as OCR-remediated and lower confidence.
+3. Read `source.manifest.json` before consuming `source.md`.
+4. Decide from `manifest["quality"]`:
+   - `good` with `risk_level: low`: no hard failure was detected; use `source.md` as the primary text artifact.
+   - `good` with `risk_level: medium`: use `source.md` only after checking `warnings` and `signals`.
+   - `salvaged`: use `source.md`, but treat it as OCR-remediated and medium risk.
    - `failed_for_agent`: do not present it as clean ingestion; report the failure and the manifest reasons.
-   - For text-native inputs, `good` means usable structure survived in Markdown; it is not just "the parse succeeded" or "the Markdown is non-empty."
+   - `agent_ready: true` means `source.md` is a default agent input; it does not prove semantic fidelity.
+   - For text-native inputs, `good` means minimum usable structure survived in Markdown; it is not just "the parse succeeded" or "the Markdown is non-empty."
    - For `docx`, `html`, and `md`, accept surviving paragraph/body structure, including concise body text, or preserved list structure when the list is the document's real content; `txt` stays looser.
 5. Treat `manifest["preferred_agent_artifact"]` as the default agent entrypoint. In this contract that is always `source.md`.
 6. Treat `manifest["authoritative_artifact"]` as the recovery/deep-inspection artifact. In this contract that is always `source.docling.json`.
 7. Check `manifest["selected_attempt"]` to see which attempt won. A remediation attempt can still end as `failed_for_agent`.
 8. If image analysis matters, resolve placeholders through `source.images.json`.
+
+The automatic quality model is a risk screen, not a semantic audit. Low risk does not prove source fidelity or complete source-to-Markdown alignment.
 
 ## Images
 When analysis depends on a specific figure or chart:

@@ -90,7 +90,8 @@ def _print_conversion_summary(input_path: Path, outputs: dict[str, Any]) -> None
     print(f"Input type: {meta['input_type']}")
     print(
         f"Quality: {manifest['quality']['status']} "
-        f"(agent_ready={manifest['quality']['agent_ready']})"
+        f"(risk_level={manifest['quality']['risk_level']}, "
+        f"agent_ready={manifest['quality']['agent_ready']})"
     )
     print(
         "Sidecars: "

@@ -205,6 +205,13 @@ def _assemble_attempt_from_pages(
         pictures=images,
         page_count=len(ordered_page_nos),
     )
+    quality = _quality_helpers._apply_page_quality_risk(
+        quality,
+        {
+            page_no: page_outputs[page_no].quality
+            for page_no in ordered_page_nos
+        },
+    )
     structured_document = _merge_page_structured_documents(
         page_outputs,
         fallback_document=fallback_document,
@@ -421,6 +428,13 @@ def _convert_single_attempt(
         markdown_text=markdown_text,
         pictures=pictures,
         page_count=len(result.pages),
+    )
+    quality = _quality_helpers._apply_page_quality_risk(
+        quality,
+        {
+            page_no: page_output.quality
+            for page_no, page_output in page_outputs.items()
+        },
     )
 
     manifest = _manifest_helpers._build_attempt_manifest(

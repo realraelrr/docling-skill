@@ -218,6 +218,34 @@ def test_cli_requires_explicit_output_dir():
     assert exc_info.value.code == 2
 
 
+def test_cli_summary_prints_quality_risk_level(capsys):
+    cli._print_conversion_summary(
+        Path("/tmp/example.pdf"),
+        {
+            "markdown_path": Path("/tmp/out/source.md"),
+            "docling_json_path": Path("/tmp/out/source.docling.json"),
+            "images_path": Path("/tmp/out/source.images.json"),
+            "manifest_path": Path("/tmp/out/source.manifest.json"),
+            "meta_path": Path("/tmp/out/source.meta.json"),
+            "markdown_text": "# Title\n\nBody text.",
+            "images": [],
+            "meta": {"input_type": "pdf"},
+            "manifest": {
+                "selected_attempt": "primary",
+                "ocr_remediation_applied": False,
+                "quality": {
+                    "status": "good",
+                    "agent_ready": True,
+                    "risk_level": "low",
+                },
+            },
+        },
+    )
+
+    output = capsys.readouterr().out
+    assert "Quality: good (risk_level=low, agent_ready=True)" in output
+
+
 def test_build_attempt_manifest_sets_artifact_authority_fields():
     manifest = manifest_helpers._build_attempt_manifest(
         Path("/tmp/example.pdf"),
@@ -240,6 +268,10 @@ def test_build_attempt_manifest_sets_artifact_authority_fields():
         "source.docling.json",
         "source.images.json",
     ]
+    assert manifest["quality"]["risk_level"] == "low"
+    assert manifest["quality"]["warnings"] == []
+    assert manifest["quality"]["gate"] == "minimum_viability"
+    assert "signals" in manifest["quality"]
 
 
 def test_output_sidecars_are_written_atomically_on_serialization_failure(
@@ -432,9 +464,131 @@ def test_pdf_remediation_selection_preserves_salvaged_manifest(tmp_path, monkeyp
     ]
     assert manifest["quality"]["status"] == "salvaged"
     assert "ocr_remediation_selected" in manifest["quality"]["reasons"]
+    assert manifest["quality"]["risk_level"] == "medium"
+    assert "ocr_remediation_selected" in manifest["quality"]["warnings"]
 
     meta = outputs["meta"]
     assert meta["quality_status"] == "salvaged"
+
+
+def test_pdf_attempt_marks_nonfatal_failed_page_as_medium_risk(tmp_path):
+    input_path = tmp_path / "example.pdf"
+    page_one_doc = _structured_page_document(
+        name="page-1",
+        page_no=1,
+        text="Primary page with enough readable text.",
+    )
+    page_two_doc = _structured_page_document(
+        name="page-2",
+        page_no=2,
+        text="Thin page",
+    )
+    page_three_doc = _structured_page_document(
+        name="page-3",
+        page_no=3,
+        text="Final page with enough readable text.",
+    )
+    fallback_document = DoclingDocument.concatenate(
+        [
+            DoclingDocument.model_validate(page_one_doc),
+            DoclingDocument.model_validate(page_two_doc),
+            DoclingDocument.model_validate(page_three_doc),
+        ]
+    )
+    fallback_document.name = input_path.name
+
+    attempt = core._assemble_attempt_from_pages(
+        input_path,
+        page_outputs={
+            1: core.PageArtifacts(
+                markdown_text="Readable first page. " * 12,
+                images=[],
+                quality=_quality_report(),
+                structured_document=page_one_doc,
+            ),
+            2: core.PageArtifacts(
+                markdown_text="thin",
+                images=[],
+                quality=_quality_report(status="failed_for_agent", agent_ready=False),
+                structured_document=page_two_doc,
+            ),
+            3: core.PageArtifacts(
+                markdown_text="Readable final page. " * 12,
+                images=[],
+                quality=_quality_report(),
+                structured_document=page_three_doc,
+            ),
+        },
+        fallback_document=fallback_document,
+        original_document_name=input_path.name,
+        attempt_label="primary",
+        status="success",
+        ocr_metadata={
+            "enabled": True,
+            "engine": "tesseract",
+            "languages": ["eng"],
+            "force_full_page_ocr": False,
+        },
+    )
+
+    quality = attempt.manifest["quality"]
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["risk_level"] == "medium"
+    assert "page_quality_failed" in quality["warnings"]
+    assert quality["signals"]["page_coverage"]["failed_pages"] == [2]
+
+
+def test_pdf_attempt_fails_when_first_page_quality_fails(tmp_path):
+    input_path = tmp_path / "example.pdf"
+    page_one_doc = _structured_page_document(name="page-1", page_no=1, text="Thin page")
+    page_two_doc = _structured_page_document(
+        name="page-2",
+        page_no=2,
+        text="Readable second page with enough text.",
+    )
+    fallback_document = DoclingDocument.concatenate(
+        [
+            DoclingDocument.model_validate(page_one_doc),
+            DoclingDocument.model_validate(page_two_doc),
+        ]
+    )
+    fallback_document.name = input_path.name
+
+    attempt = core._assemble_attempt_from_pages(
+        input_path,
+        page_outputs={
+            1: core.PageArtifacts(
+                markdown_text="thin",
+                images=[],
+                quality=_quality_report(status="failed_for_agent", agent_ready=False),
+                structured_document=page_one_doc,
+            ),
+            2: core.PageArtifacts(
+                markdown_text="Readable second page. " * 12,
+                images=[],
+                quality=_quality_report(),
+                structured_document=page_two_doc,
+            ),
+        },
+        fallback_document=fallback_document,
+        original_document_name=input_path.name,
+        attempt_label="primary",
+        status="success",
+        ocr_metadata={
+            "enabled": True,
+            "engine": "tesseract",
+            "languages": ["eng"],
+            "force_full_page_ocr": False,
+        },
+    )
+
+    quality = attempt.manifest["quality"]
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert quality["risk_level"] == "high"
+    assert "page_quality_failed" in quality["reasons"]
+    assert quality["signals"]["page_coverage"]["failed_pages"] == [1]
 
 
 def test_merge_page_attempts_rebuilds_structured_document_for_remediated_pages(tmp_path):

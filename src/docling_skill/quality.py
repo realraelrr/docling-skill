@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 import re
 from typing import Any
 
@@ -17,8 +18,125 @@ from .constants import (
 from .models import ImageSidecar
 
 
+QUALITY_GATE = "minimum_viability"
+QUALITY_LIMITATIONS = [
+    "Automated checks do not verify semantic fidelity.",
+    "Automated checks do not prove complete source-to-markdown alignment.",
+]
+RISK_LEVELS = ("low", "medium", "high")
+RISK_RANK = {level: rank for rank, level in enumerate(RISK_LEVELS)}
+MIN_REPETITION_TOKENS = 20
+MAX_REPETITIVE_TOKEN_RATIO = 0.5
+
+
 def _compact_character_count(text: str) -> int:
     return len(re.sub(r"\s+", "", text))
+
+
+def _unique(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    for value in values:
+        if value not in deduped:
+            deduped.append(value)
+    return deduped
+
+
+def _raise_quality_risk(quality: dict[str, Any], risk_level: str) -> None:
+    current = quality.get("risk_level", "low")
+    if RISK_RANK[risk_level] > RISK_RANK.get(current, 0):
+        quality["risk_level"] = risk_level
+
+
+def _add_quality_warning(
+    quality: dict[str, Any],
+    warning: str,
+    *,
+    min_risk: str = "medium",
+) -> None:
+    quality["warnings"] = _unique([*quality.get("warnings", []), warning])
+    _raise_quality_risk(quality, min_risk)
+
+
+def _ensure_quality_evidence_fields(quality: dict[str, Any]) -> dict[str, Any]:
+    quality.setdefault("warnings", [])
+    quality.setdefault("gate", QUALITY_GATE)
+    quality.setdefault("limitations", list(QUALITY_LIMITATIONS))
+    quality.setdefault("signals", {})
+    quality.setdefault(
+        "risk_level",
+        "high"
+        if quality.get("status") == "failed_for_agent"
+        else ("medium" if quality["warnings"] else "low"),
+    )
+    return quality
+
+
+def _finalize_quality_report(
+    *,
+    status: str,
+    reasons: list[str],
+    warnings: list[str],
+    placeholder_count: int,
+    non_placeholder_characters: int,
+    min_required_text_characters: int,
+    picture_count: int,
+    content_trust: dict[str, float],
+    signals: dict[str, Any],
+) -> dict[str, Any]:
+    quality = {
+        "status": status,
+        "agent_ready": status == "good",
+        "reasons": _unique(reasons),
+        "warnings": _unique(warnings),
+        "placeholder_count": placeholder_count,
+        "non_placeholder_characters": non_placeholder_characters,
+        "min_required_text_characters": min_required_text_characters,
+        "picture_count": picture_count,
+        "content_trust": content_trust,
+        "risk_level": "high" if status == "failed_for_agent" else ("medium" if warnings else "low"),
+        "gate": QUALITY_GATE,
+        "limitations": list(QUALITY_LIMITATIONS),
+        "signals": signals,
+    }
+    return quality
+
+
+def _signal_status(*, failed: bool = False, warned: bool = False) -> str:
+    if failed:
+        return "fail"
+    if warned:
+        return "warn"
+    return "pass"
+
+
+def _compute_repetition_signal(markdown_text: str) -> dict[str, Any]:
+    tokens = [
+        token.lower()
+        for token in TOKEN_PATTERN.findall(markdown_text)
+        if re.search(r"[A-Za-z0-9\u4e00-\u9fff]", token)
+    ]
+    if not tokens:
+        return {
+            "status": "pass",
+            "token_count": 0,
+            "top_token": None,
+            "top_token_ratio": 0.0,
+            "max_repetitive_token_ratio": MAX_REPETITIVE_TOKEN_RATIO,
+        }
+
+    top_token, top_count = Counter(tokens).most_common(1)[0]
+    top_token_ratio = top_count / len(tokens)
+    warned = (
+        len(tokens) >= MIN_REPETITION_TOKENS
+        and top_token_ratio >= MAX_REPETITIVE_TOKEN_RATIO
+    )
+    return {
+        "status": "warn" if warned else "pass",
+        "token_count": len(tokens),
+        "top_token": top_token,
+        "top_token_ratio": top_token_ratio,
+        "max_repetitive_token_ratio": MAX_REPETITIVE_TOKEN_RATIO,
+    }
 
 
 def _assess_agent_quality(
@@ -44,6 +162,7 @@ def _assess_agent_quality(
     if compute_content_trust_signals is None:
         compute_content_trust_signals = _compute_content_trust_signals
     content_trust = compute_content_trust_signals(text_without_placeholders)
+    repetition_signal = _compute_repetition_signal(text_without_placeholders)
 
     reasons: list[str] = []
     if non_placeholder_characters < required_text:
@@ -58,19 +177,49 @@ def _assess_agent_quality(
             and content_trust["table_fragment_signal"] >= MAX_TABLE_FRAGMENT_SIGNAL
         ):
             reasons.append("fragmented_layout")
+    warnings: list[str] = []
+    if not reasons and repetition_signal["status"] == "warn":
+        warnings.append("repetitive_text")
 
     status = "good" if not reasons else "failed_for_agent"
-
-    return {
-        "status": status,
-        "agent_ready": status == "good",
-        "reasons": reasons,
-        "placeholder_count": placeholder_count,
-        "non_placeholder_characters": non_placeholder_characters,
-        "min_required_text_characters": required_text,
-        "picture_count": len(pictures),
-        "content_trust": content_trust,
+    signals = {
+        "content_coverage": {
+            "status": _signal_status(failed="low_text_content" in reasons),
+            "non_placeholder_characters": non_placeholder_characters,
+            "min_required_text_characters": required_text,
+            "placeholder_count": placeholder_count,
+            "picture_count": len(pictures),
+        },
+        "structure_survival": {
+            "status": "pass",
+            "line_structure_signal": content_trust["line_structure_signal"],
+        },
+        "ocr_noise": {
+            "status": _signal_status(failed="high_ocr_noise" in reasons),
+            "ocr_noise_ratio": content_trust["ocr_noise_ratio"],
+            "max_ocr_noise_ratio": MAX_OCR_NOISE_RATIO,
+        },
+        "layout_fragmentation": {
+            "status": _signal_status(failed="fragmented_layout" in reasons),
+            "line_structure_signal": content_trust["line_structure_signal"],
+            "min_line_structure_signal": MIN_LINE_STRUCTURE_SIGNAL,
+            "table_fragment_signal": content_trust["table_fragment_signal"],
+            "max_table_fragment_signal": MAX_TABLE_FRAGMENT_SIGNAL,
+        },
+        "repetition": repetition_signal,
     }
+
+    return _finalize_quality_report(
+        status=status,
+        reasons=reasons,
+        warnings=warnings,
+        placeholder_count=placeholder_count,
+        non_placeholder_characters=non_placeholder_characters,
+        min_required_text_characters=required_text,
+        picture_count=len(pictures),
+        content_trust=content_trust,
+        signals=signals,
+    )
 
 
 def _assess_text_native_quality(
@@ -98,41 +247,68 @@ def _assess_text_native_quality(
         min_text_native_characters = _min_text_native_characters
     if compute_content_trust_signals is None:
         compute_content_trust_signals = _compute_content_trust_signals
+    content_trust = compute_content_trust_signals(text_without_placeholders)
+    repetition_signal = _compute_repetition_signal(text_without_placeholders)
     structure_signals = compute_text_native_structure_signals(
         text_without_placeholders,
         input_type=input_type,
     )
-
-    reasons: list[str] = []
-    if non_placeholder_characters < min_text_native_characters(
+    required_text = min_text_native_characters(
         input_type,
         structure_signals=structure_signals,
-    ):
+    )
+
+    reasons: list[str] = []
+    if non_placeholder_characters < required_text:
         reasons.append("low_text_content")
     if placeholder_count > 0 and non_placeholder_characters == 0:
         reasons.append("image_only_output")
     if (
-        non_placeholder_characters
-        >= min_text_native_characters(input_type, structure_signals=structure_signals)
+        non_placeholder_characters >= required_text
         and not has_text_native_body_survival(input_type, structure_signals)
     ):
         reasons.append("missing_body_structure")
+    warnings: list[str] = []
+    if not reasons and repetition_signal["status"] == "warn":
+        warnings.append("repetitive_text")
 
     status = "good" if not reasons else "failed_for_agent"
-
-    return {
-        "status": status,
-        "agent_ready": status == "good",
-        "reasons": reasons,
-        "placeholder_count": placeholder_count,
-        "non_placeholder_characters": non_placeholder_characters,
-        "min_required_text_characters": min_text_native_characters(
-            input_type,
-            structure_signals=structure_signals,
-        ),
-        "picture_count": len(pictures),
-        "content_trust": compute_content_trust_signals(text_without_placeholders),
+    signals = {
+        "content_coverage": {
+            "status": _signal_status(failed="low_text_content" in reasons),
+            "non_placeholder_characters": non_placeholder_characters,
+            "min_required_text_characters": required_text,
+            "placeholder_count": placeholder_count,
+            "picture_count": len(pictures),
+        },
+        "structure_survival": {
+            "status": _signal_status(failed="missing_body_structure" in reasons),
+            **structure_signals,
+        },
+        "ocr_noise": {
+            "status": _signal_status(failed="high_ocr_noise" in reasons),
+            "ocr_noise_ratio": content_trust["ocr_noise_ratio"],
+            "max_ocr_noise_ratio": MAX_OCR_NOISE_RATIO,
+        },
+        "layout_fragmentation": {
+            "status": "pass",
+            "line_structure_signal": content_trust["line_structure_signal"],
+            "table_fragment_signal": content_trust["table_fragment_signal"],
+        },
+        "repetition": repetition_signal,
     }
+
+    return _finalize_quality_report(
+        status=status,
+        reasons=reasons,
+        warnings=warnings,
+        placeholder_count=placeholder_count,
+        non_placeholder_characters=non_placeholder_characters,
+        min_required_text_characters=required_text,
+        picture_count=len(pictures),
+        content_trust=content_trust,
+        signals=signals,
+    )
 
 
 def _assess_spreadsheet_quality(
@@ -160,6 +336,8 @@ def _assess_spreadsheet_quality(
         has_spreadsheet_table_content = _has_spreadsheet_table_content
     if compute_content_trust_signals is None:
         compute_content_trust_signals = _compute_content_trust_signals
+    content_trust = compute_content_trust_signals(text_without_placeholders)
+    table_signals = _compute_spreadsheet_table_signals(structured_document)
     has_table_structure = has_spreadsheet_table_content(structured_document)
 
     reasons: list[str] = []
@@ -169,19 +347,56 @@ def _assess_spreadsheet_quality(
         reasons.append("low_table_content")
     if placeholder_count > 0 and non_placeholder_characters == 0 and not has_table_structure:
         reasons.append("image_only_output")
+    warnings: list[str] = []
+    if not reasons and table_signals["non_empty_cell_count"] <= 2:
+        warnings.append("thin_table_content")
+    if (
+        not reasons
+        and table_signals["structured_text_characters"] >= 20
+        and non_placeholder_characters
+        < table_signals["structured_text_characters"] * 0.25
+    ):
+        warnings.append("markdown_structured_mismatch")
 
     status = "good" if not reasons else "failed_for_agent"
-
-    return {
-        "status": status,
-        "agent_ready": status == "good",
-        "reasons": reasons,
-        "placeholder_count": placeholder_count,
-        "non_placeholder_characters": non_placeholder_characters,
-        "min_required_text_characters": 0,
-        "picture_count": len(pictures),
-        "content_trust": compute_content_trust_signals(text_without_placeholders),
+    signals = {
+        "content_coverage": {
+            "status": _signal_status(failed="low_text_content" in reasons),
+            "non_placeholder_characters": non_placeholder_characters,
+            "min_required_text_characters": 0,
+            "placeholder_count": placeholder_count,
+            "picture_count": len(pictures),
+        },
+        "structure_survival": {
+            "status": _signal_status(
+                failed="low_table_content" in reasons,
+                warned="thin_table_content" in warnings,
+            ),
+            **table_signals,
+        },
+        "ocr_noise": {
+            "status": "pass",
+            "ocr_noise_ratio": content_trust["ocr_noise_ratio"],
+            "max_ocr_noise_ratio": MAX_OCR_NOISE_RATIO,
+        },
+        "layout_fragmentation": {
+            "status": "pass",
+            "line_structure_signal": content_trust["line_structure_signal"],
+            "table_fragment_signal": content_trust["table_fragment_signal"],
+        },
     }
+
+    return _finalize_quality_report(
+        status=status,
+        reasons=reasons,
+        warnings=warnings,
+        placeholder_count=placeholder_count,
+        non_placeholder_characters=non_placeholder_characters,
+        min_required_text_characters=0,
+        picture_count=len(pictures),
+        content_trust=content_trust,
+        signals=signals,
+    )
 
 
 def _compact_spreadsheet_markdown_character_count(markdown_text: str) -> int:
@@ -205,6 +420,94 @@ def _has_spreadsheet_table_content(
             if isinstance(cell, dict) and compact_character_count(str(cell.get("text", ""))) > 0:
                 return True
     return False
+
+
+def _iter_spreadsheet_cells(structured_document: dict[str, Any]) -> list[dict[str, Any]]:
+    cells: list[dict[str, Any]] = []
+    for table in structured_document.get("tables", []):
+        if not isinstance(table, dict):
+            continue
+        data = table.get("data", {})
+        if not isinstance(data, dict):
+            continue
+        cells.extend(
+            cell
+            for cell in data.get("table_cells", [])
+            if isinstance(cell, dict)
+        )
+    return cells
+
+
+def _compute_spreadsheet_table_signals(
+    structured_document: dict[str, Any],
+    *,
+    compact_character_count=_compact_character_count,
+) -> dict[str, int]:
+    tables = [
+        table for table in structured_document.get("tables", [])
+        if isinstance(table, dict)
+    ]
+    cells = _iter_spreadsheet_cells(structured_document)
+    non_empty_cells = [
+        cell
+        for cell in cells
+        if compact_character_count(str(cell.get("text", ""))) > 0
+    ]
+    return {
+        "table_count": len(tables),
+        "cell_count": len(cells),
+        "non_empty_cell_count": len(non_empty_cells),
+        "structured_text_characters": sum(
+            compact_character_count(str(cell.get("text", "")))
+            for cell in non_empty_cells
+        ),
+    }
+
+
+def _apply_page_quality_risk(
+    quality: dict[str, Any],
+    page_quality: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    quality = _ensure_quality_evidence_fields(quality)
+    if not page_quality:
+        quality["signals"]["page_coverage"] = {
+            "status": "pass",
+            "page_count": 0,
+            "failed_page_count": 0,
+            "failed_page_ratio": 0.0,
+            "failed_pages": [],
+        }
+        return quality
+
+    page_count = len(page_quality)
+    failed_pages = [
+        page_no
+        for page_no, page_report in sorted(page_quality.items())
+        if not page_report.get("agent_ready", False)
+    ]
+    failed_page_ratio = len(failed_pages) / page_count
+    fatal_page_failure = bool(
+        failed_pages
+        and (page_count == 1 or failed_pages[0] == 1 or failed_page_ratio >= 0.5)
+    )
+    page_signal = {
+        "status": _signal_status(failed=fatal_page_failure, warned=bool(failed_pages)),
+        "page_count": page_count,
+        "failed_page_count": len(failed_pages),
+        "failed_page_ratio": failed_page_ratio,
+        "failed_pages": failed_pages,
+    }
+    quality["signals"]["page_coverage"] = page_signal
+
+    if fatal_page_failure:
+        quality["status"] = "failed_for_agent"
+        quality["agent_ready"] = False
+        quality["reasons"] = _unique([*quality.get("reasons", []), "page_quality_failed"])
+        _raise_quality_risk(quality, "high")
+    elif failed_pages:
+        _add_quality_warning(quality, "page_quality_failed")
+
+    return quality
 
 
 def _strip_image_tokens(markdown_text: str) -> str:

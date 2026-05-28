@@ -1,13 +1,13 @@
 # docling-skill
 
-`docling-skill` is a local, agent-first ingestion layer built on top of [Docling](https://github.com/docling-project/docling). It converts local documents into a stable `source.*` sidecar contract that LLM agents can inspect and consume safely.
+`docling-skill` is a local, agent-first ingestion layer built on top of [Docling](https://github.com/docling-project/docling). It converts local documents into a stable `source.*` sidecar contract that LLM agents can inspect before consuming.
 
 [中文 README](README.zh-CN.md)
 
-Use it when an agent needs trustworthy local PDF, Office, HTML, text, or
+Use it when an agent needs risk-aware local PDF, Office, HTML, text, or
 Markdown conversion before downstream reasoning, retrieval, wiki ingestion, or
-handoff. The key output is not just Markdown; it is an inspectable manifest that
-tells the agent whether the source is ready to trust.
+handoff. The key output is not just Markdown; it is an inspectable manifest with
+minimum viability gates, risk level, warnings, and evidence signals.
 
 ## What It Does
 
@@ -17,7 +17,7 @@ Each successful conversion writes:
 
 | Artifact | Purpose |
 | --- | --- |
-| `source.manifest.json` | Quality, routing, remediation, and trust metadata |
+| `source.manifest.json` | Quality risk, routing, remediation, and evidence metadata |
 | `source.md` | Default agent-readable Markdown |
 | `source.docling.json` | Authoritative structured Docling export from the same conversion result |
 | `source.images.json` | Always-written image sidecar list; empty when extraction is unavailable or no images are found |
@@ -26,9 +26,14 @@ Each successful conversion writes:
 Downstream rule:
 
 1. Read `source.manifest.json` first.
-2. If `quality.agent_ready` is true, read `source.md` by default.
-3. Use `source.docling.json` when structure, recovery, or deeper inspection matters.
-4. Resolve image placeholders such as `[[image:picture-p2-1]]` through `source.images.json`.
+2. Inspect `quality.status`, `quality.risk_level`, `quality.warnings`, and `quality.signals`.
+3. If `quality.agent_ready` is true, `source.md` is usable as the default agent input.
+4. Use `source.docling.json` when structure, recovery, or deeper inspection matters.
+5. Resolve image placeholders such as `[[image:picture-p2-1]]` through `source.images.json`.
+
+The automatic quality model is a risk screen, not a semantic audit. A low-risk
+result means no hard failure was detected; it does not prove source fidelity or
+complete source-to-Markdown alignment.
 
 `docling-skill` intentionally does not fetch remote URLs, chunk documents, or emit downstream knowledge fields such as tags, keywords, categories, or summaries.
 
@@ -79,7 +84,7 @@ PDF-oriented OCR options:
 Manifest check:
 
 ```bash
-python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "agent_ready": m["quality"]["agent_ready"], "selected_attempt": m["selected_attempt"]})'
+python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); q = m["quality"]; print({"status": q["status"], "risk_level": q["risk_level"], "agent_ready": q["agent_ready"], "warnings": q["warnings"], "selected_attempt": m["selected_attempt"]})'
 ```
 
 Python API:
@@ -97,6 +102,10 @@ outputs = convert_document_to_ingestion_outputs(
 manifest = outputs["manifest"]
 if not manifest["quality"]["agent_ready"]:
     raise RuntimeError(manifest["quality"])
+
+if manifest["quality"]["risk_level"] != "low":
+    print(manifest["quality"]["warnings"])
+    print(manifest["quality"]["signals"])
 
 markdown_text = outputs["markdown_text"]
 structured_document = outputs["docling_document"]
@@ -144,7 +153,7 @@ conda run -n docling python -m pytest
 
 `docling-skill` is a thin workflow layer on top of official `docling`, not a Docling fork or official distribution.
 
-The skill workflow contract lives in [SKILL.md](SKILL.md). Docling supports more formats than this project exposes; new formats should only be added when they preserve the local `source.*` contract, quality gating, and tests.
+The skill workflow contract lives in [SKILL.md](SKILL.md). Docling supports more formats than this project exposes; new formats should only be added when they preserve the local `source.*` contract, risk evidence model, and tests.
 
 ## Acknowledgements
 

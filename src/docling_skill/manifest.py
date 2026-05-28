@@ -7,6 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from . import quality as _quality_helpers
 from .constants import (
     AUTHORITATIVE_ARTIFACT,
     AVAILABLE_ARTIFACTS,
@@ -69,6 +70,8 @@ def _serialize_page_quality(
 
 def _apply_artifact_authority(manifest: dict[str, Any]) -> dict[str, Any]:
     normalized_manifest = deepcopy(manifest)
+    if "quality" in normalized_manifest:
+        _quality_helpers._ensure_quality_evidence_fields(normalized_manifest["quality"])
     normalized_manifest["preferred_agent_artifact"] = PREFERRED_AGENT_ARTIFACT
     normalized_manifest["authoritative_artifact"] = AUTHORITATIVE_ARTIFACT
     normalized_manifest["available_artifacts"] = list(AVAILABLE_ARTIFACTS)
@@ -119,11 +122,16 @@ def _finalize_selected_manifest(
     apply_artifact_authority=_apply_artifact_authority,
 ) -> dict[str, Any]:
     finalized = apply_artifact_authority(manifest)
-    quality = finalized["quality"]
+    quality = _quality_helpers._ensure_quality_evidence_fields(finalized["quality"])
 
     if finalized.get("attempt") != "primary" and quality.get("agent_ready"):
         quality["status"] = "salvaged"
         if "ocr_remediation_selected" not in quality["reasons"]:
             quality["reasons"] = [*quality["reasons"], "ocr_remediation_selected"]
+        _quality_helpers._add_quality_warning(
+            quality,
+            "ocr_remediation_selected",
+            min_risk="medium",
+        )
 
     return finalized

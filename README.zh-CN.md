@@ -1,6 +1,6 @@
 # docling-skill
 
-`docling-skill` 是一个构建在 [Docling](https://github.com/docling-project/docling) 之上的本地优先、面向 Agent 的 ingestion 层。它把本地文档转换成稳定的 `source.*` sidecar 契约，方便 LLM agent 先检查质量，再安全消费内容。
+`docling-skill` 是一个构建在 [Docling](https://github.com/docling-project/docling) 之上的本地优先、面向 Agent 的 ingestion 层。它把本地文档转换成稳定的 `source.*` sidecar 契约，方便 LLM agent 先检查风险证据，再消费内容。
 
 [English README](README.md)
 
@@ -12,7 +12,7 @@
 
 | Artifact | 用途 |
 | --- | --- |
-| `source.manifest.json` | 质量、路由、补救路径和信任元数据 |
+| `source.manifest.json` | 质量风险、路由、补救路径和证据元数据 |
 | `source.md` | Agent 默认读取的 Markdown |
 | `source.docling.json` | 与 `source.md` 来自同一次转换结果的权威 Docling 结构化导出 |
 | `source.images.json` | 始终写出的图片 sidecar 列表；无法提图或没有图片时为空数组 |
@@ -21,9 +21,12 @@
 下游消费规则：
 
 1. 先读 `source.manifest.json`。
-2. 如果 `quality.agent_ready` 为 true，默认读取 `source.md`。
-3. 需要结构恢复、校正 Markdown 歧义或深入检查时，读取 `source.docling.json`。
-4. 通过 `source.images.json` 解析 `[[image:picture-p2-1]]` 这类图片占位符。
+2. 检查 `quality.status`、`quality.risk_level`、`quality.warnings` 和 `quality.signals`。
+3. 如果 `quality.agent_ready` 为 true，`source.md` 可作为默认 agent 输入。
+4. 需要结构恢复、校正 Markdown 歧义或深入检查时，读取 `source.docling.json`。
+5. 通过 `source.images.json` 解析 `[[image:picture-p2-1]]` 这类图片占位符。
+
+自动质量模型只是风险筛查，不是语义审校。低风险表示没有检测到硬失败，不代表已经证明源文档语义保真或完整对齐。
 
 `docling-skill` 不负责远程 URL 抓取、文档 chunking，也不输出标签、关键词、分类、摘要等下游知识库字段。
 
@@ -74,7 +77,7 @@ python -m docling_skill.cli "<input_path>" "<output_dir>"
 检查 manifest：
 
 ```bash
-python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); print({"status": m["quality"]["status"], "agent_ready": m["quality"]["agent_ready"], "selected_attempt": m["selected_attempt"]})'
+python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); q = m["quality"]; print({"status": q["status"], "risk_level": q["risk_level"], "agent_ready": q["agent_ready"], "warnings": q["warnings"], "selected_attempt": m["selected_attempt"]})'
 ```
 
 Python API：
@@ -92,6 +95,10 @@ outputs = convert_document_to_ingestion_outputs(
 manifest = outputs["manifest"]
 if not manifest["quality"]["agent_ready"]:
     raise RuntimeError(manifest["quality"])
+
+if manifest["quality"]["risk_level"] != "low":
+    print(manifest["quality"]["warnings"])
+    print(manifest["quality"]["signals"])
 
 markdown_text = outputs["markdown_text"]
 structured_document = outputs["docling_document"]
@@ -139,7 +146,7 @@ conda run -n docling python -m pytest
 
 `docling-skill` 是官方 `docling` 之上的薄 workflow 层，不是 Docling fork，也不是官方发行版。
 
-Skill workflow 契约位于 [SKILL.md](SKILL.md)。Docling 支持的格式比本项目当前暴露的更多。新增格式时，必须先保证它能保留本地 `source.*` 契约、质量门禁和测试。
+Skill workflow 契约位于 [SKILL.md](SKILL.md)。Docling 支持的格式比本项目当前暴露的更多。新增格式时，必须先保证它能保留本地 `source.*` 契约、风险证据模型和测试。
 
 ## 致谢
 

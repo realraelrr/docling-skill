@@ -83,6 +83,42 @@ def test_assess_agent_quality_flags_image_only_output():
     assert "low_text_content" in quality["reasons"]
 
 
+def test_good_quality_report_includes_risk_evidence_model():
+    quality = _assess_agent_quality(
+        markdown_text="This paragraph has enough ordinary prose for the minimum viability gate. "
+        "It is usable as agent input, but the automated gate does not prove semantic fidelity.",
+        pictures=[],
+        page_count=1,
+    )
+
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["risk_level"] == "low"
+    assert quality["warnings"] == []
+    assert quality["gate"] == "minimum_viability"
+    assert "semantic fidelity" in " ".join(quality["limitations"])
+    assert {
+        "content_coverage",
+        "structure_survival",
+        "ocr_noise",
+        "layout_fragmentation",
+    }.issubset(quality["signals"])
+
+
+def test_assess_agent_quality_warns_on_repetitive_text_without_hard_failure():
+    quality = _assess_agent_quality(
+        markdown_text="foo " * 40,
+        pictures=[],
+        page_count=1,
+    )
+
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["risk_level"] == "medium"
+    assert "repetitive_text" in quality["warnings"]
+    assert quality["signals"]["repetition"]["status"] == "warn"
+
+
 def test_assess_text_native_quality_accepts_short_nonempty_markdown():
     quality = _assess_text_native_quality(
         markdown_text="Short paragraph.",
@@ -168,6 +204,30 @@ def test_assess_spreadsheet_quality_rejects_delimiter_only_csv_preview():
     assert quality["status"] == "failed_for_agent"
     assert quality["agent_ready"] is False
     assert "low_table_content" in quality["reasons"]
+
+
+def test_assess_spreadsheet_quality_warns_on_single_cell_table():
+    quality = _assess_spreadsheet_quality(
+        markdown_text="Revenue",
+        pictures=[],
+        structured_document={
+            "tables": [
+                {
+                    "data": {
+                        "table_cells": [
+                            {"text": "Revenue"},
+                        ]
+                    }
+                }
+            ]
+        },
+    )
+
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["risk_level"] == "medium"
+    assert "thin_table_content" in quality["warnings"]
+    assert quality["signals"]["structure_survival"]["non_empty_cell_count"] == 1
 
 
 def test_extract_spreadsheet_metadata_counts_sheets_tables_and_merged_cells():
