@@ -2,9 +2,11 @@ import json
 import tomllib
 from pathlib import Path
 
+import pytest
 import docling_skill
 import docling_skill.cli as cli
 import docling_skill.core as core
+from docling_skill import manifest as manifest_helpers
 from docling_core.types.doc import BoundingBox, CoordOrigin, Size
 from docling_core.types.doc.document import DocItemLabel, DoclingDocument, ProvenanceItem
 
@@ -146,160 +148,18 @@ def test_cli_re_exports_core_entrypoints():
     assert cli.main.__module__ == "docling_skill.cli"
 
 
-def test_core_facade_keeps_private_compatibility_exports():
-    expected_exports = [
-        "AttemptArtifacts",
-        "PageArtifacts",
-        "PROJECT_ROOT",
-        "_apply_artifact_authority",
-        "_assess_agent_quality",
-        "_assess_page_qualities",
-        "_assess_spreadsheet_quality",
-        "_assess_text_native_quality",
-        "_build_attempt_manifest",
-        "_build_ocr_options",
-        "_build_ocr_remediation_config",
-        "_build_page_remediation_plan",
-        "_build_remediation_plan",
-        "_collect_page_outputs",
-        "_collect_picture_sidecars",
-        "_compute_line_structure_signal",
-        "_compute_ocr_noise_ratio",
-        "_compute_table_fragment_signal",
-        "_convert_pdf_input",
-        "_convert_single_attempt",
-        "_convert_spreadsheet_input",
-        "_convert_text_native_input",
-        "_export_page_markdown",
-        "_export_structured_document",
-        "_extract_spreadsheet_metadata",
-        "_finalize_selected_manifest",
-        "_merge_page_attempts",
-        "_normalize_xls_to_xlsx",
-        "_remediate_pages",
-        "_select_remediation_plan",
+def test_core_public_surface_does_not_re_export_helper_modules():
+    assert core.__all__ == [
+        "convert_document_to_ingestion_outputs",
+        "convert_pdf_to_sidecar_outputs",
         "build_source_meta",
         "detect_input_type",
         "infer_source_title",
     ]
-
-    missing_exports = [name for name in expected_exports if not hasattr(core, name)]
-
-    assert missing_exports == []
-
-
-def test_core_facade_wrappers_preserve_private_helper_monkeypatches(monkeypatch):
-    language_calls: list[tuple[str, list[str]]] = []
-
-    def fake_normalize_engine_languages(
-        ocr_engine: str,
-        ocr_languages: list[str],
-    ) -> list[str]:
-        language_calls.append((ocr_engine, ocr_languages))
-        return ["eng"]
-
-    monkeypatch.setattr(
-        core,
-        "_normalize_engine_languages",
-        fake_normalize_engine_languages,
-    )
-
-    core._build_ocr_options(
-        "tesseract",
-        ["raw"],
-        force_full_page_ocr=False,
-    )
-
-    assert language_calls == [("tesseract", ["raw"])]
-
-    authority_calls: list[str] = []
-
-    def fake_apply_artifact_authority(manifest: dict[str, object]) -> dict[str, object]:
-        authority_calls.append(str(manifest["attempt"]))
-        return {**manifest, "compat_marker": True}
-
-    monkeypatch.setattr(core, "_apply_artifact_authority", fake_apply_artifact_authority)
-
-    manifest = core._finalize_selected_manifest(
-        {
-            "attempt": "primary",
-            "quality": {
-                "status": "good",
-                "agent_ready": True,
-                "reasons": [],
-            },
-        }
-    )
-
-    assert authority_calls == ["primary"]
-    assert manifest["compat_marker"] is True
-
-    quality_calls: list[tuple[str, str]] = []
-
-    def fake_strip_image_tokens(markdown_text: str) -> str:
-        quality_calls.append(("strip", markdown_text))
-        return "patched semantic text"
-
-    def fake_content_trust(markdown_text: str) -> dict[str, float]:
-        quality_calls.append(("trust", markdown_text))
-        return {
-            "ocr_noise_ratio": 0.0,
-            "line_structure_signal": 1.0,
-            "table_fragment_signal": 0.0,
-        }
-
-    monkeypatch.setattr(core, "_strip_image_tokens", fake_strip_image_tokens)
-    monkeypatch.setattr(core, "_compute_content_trust_signals", fake_content_trust)
-
-    quality = core._assess_agent_quality(
-        markdown_text="[[image:picture-0]] raw",
-        pictures=[],
-        page_count=1,
-        min_required_text=1,
-    )
-
-    assert quality_calls == [
-        ("strip", "[[image:picture-0]] raw"),
-        ("trust", "patched semantic text"),
-    ]
-    assert quality["status"] == "good"
-
-    spreadsheet_calls: list[str] = []
-
-    def fake_safe_excel_sheet_title(title: str, fallback: str) -> str:
-        spreadsheet_calls.append(f"title:{title}:{fallback}")
-        return "patched-title"
-
-    def fake_xls_cell_value(book: object, cell: object) -> object:
-        spreadsheet_calls.append("cell")
-        return "patched-cell"
-
-    def fake_normalize_xls_to_xlsx(
-        input_path: Path,
-        output_path: Path,
-        *,
-        safe_excel_sheet_title,
-        xls_cell_value,
-    ) -> Path:
-        safe_excel_sheet_title("Unsafe/Name", "Sheet1")
-        xls_cell_value(object(), object())
-        return output_path
-
-    monkeypatch.setattr(core, "_safe_excel_sheet_title", fake_safe_excel_sheet_title)
-    monkeypatch.setattr(core, "_xls_cell_value", fake_xls_cell_value)
-    monkeypatch.setattr(
-        core._spreadsheet_helpers,
-        "_normalize_xls_to_xlsx",
-        fake_normalize_xls_to_xlsx,
-    )
-
-    normalized_path = core._normalize_xls_to_xlsx(
-        Path("/tmp/source.xls"),
-        Path("/tmp/output.xlsx"),
-    )
-
-    assert normalized_path == Path("/tmp/output.xlsx")
-    assert spreadsheet_calls == ["title:Unsafe/Name:Sheet1", "cell"]
+    assert not hasattr(core, "_assess_agent_quality")
+    assert not hasattr(core, "_build_ocr_options")
+    assert not hasattr(core, "_export_structured_document")
+    assert hasattr(core, "_convert_pdf_input")
 
 
 def test_package_exposes_project_root_constant():
@@ -324,8 +184,17 @@ def test_cli_accepts_input_path_argument():
     assert "input_path" in action_names
 
 
+def test_cli_requires_explicit_output_dir():
+    parser = cli._build_parser()
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(["input.pdf"])
+
+    assert exc_info.value.code == 2
+
+
 def test_build_attempt_manifest_sets_artifact_authority_fields():
-    manifest = core._build_attempt_manifest(
+    manifest = manifest_helpers._build_attempt_manifest(
         Path("/tmp/example.pdf"),
         input_type="pdf",
         pipeline_family="standard_pdf",
@@ -346,6 +215,71 @@ def test_build_attempt_manifest_sets_artifact_authority_fields():
         "source.docling.json",
         "source.images.json",
     ]
+
+
+def test_output_sidecars_are_written_atomically_on_serialization_failure(
+    tmp_path,
+    monkeypatch,
+):
+    input_path = tmp_path / "example.pdf"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    existing_files = {
+        "source.md": "old markdown",
+        "source.docling.json": '{"old": "docling"}',
+        "source.images.json": '[{"old": "image"}]',
+        "source.manifest.json": '{"old": "manifest"}',
+        "source.meta.json": '{"old": "meta"}',
+    }
+    for filename, content in existing_files.items():
+        (output_dir / filename).write_text(content, encoding="utf-8")
+
+    bad_attempt = _fake_attempt(input_path)
+    bad_attempt.markdown_text = "new markdown"
+    bad_attempt.structured_document = {"not_json": object()}
+
+    monkeypatch.setattr(
+        core,
+        "_dispatch_conversion",
+        lambda *args, **kwargs: (bad_attempt, [bad_attempt.manifest]),
+    )
+
+    with pytest.raises(TypeError):
+        core.convert_document_to_ingestion_outputs(
+            input_path=input_path,
+            output_dir=output_dir,
+        )
+
+    for filename, content in existing_files.items():
+        assert (output_dir / filename).read_text(encoding="utf-8") == content
+
+
+def test_output_sidecar_publish_preflights_non_file_targets(
+    tmp_path,
+    monkeypatch,
+):
+    input_path = tmp_path / "example.pdf"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    (output_dir / "source.md").write_text("old markdown", encoding="utf-8")
+    (output_dir / "source.docling.json").mkdir()
+
+    good_attempt = _fake_attempt(input_path)
+
+    monkeypatch.setattr(
+        core,
+        "_dispatch_conversion",
+        lambda *args, **kwargs: (good_attempt, [good_attempt.manifest]),
+    )
+
+    with pytest.raises(RuntimeError, match="not a regular file"):
+        core.convert_document_to_ingestion_outputs(
+            input_path=input_path,
+            output_dir=output_dir,
+        )
+
+    assert (output_dir / "source.md").read_text(encoding="utf-8") == "old markdown"
+    assert (output_dir / "source.docling.json").is_dir()
 
 
 def test_output_contract_uses_source_sidecars(tmp_path, monkeypatch):

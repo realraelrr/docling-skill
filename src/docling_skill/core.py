@@ -27,21 +27,8 @@ from . import manifest as _manifest_helpers
 from . import ocr as _ocr_helpers
 from . import quality as _quality_helpers
 from . import spreadsheet as _spreadsheet_helpers
-# Keep moved names importable from docling_skill.core for compatibility.
 from .constants import (
-    AUTHORITATIVE_ARTIFACT,
-    AVAILABLE_ARTIFACTS,
-    IMAGE_TOKEN_PATTERN,
-    IMAGE_PLACEHOLDER,
-    INPUT_TYPE_BY_SUFFIX,
-    MARKDOWN_PREFIX_PATTERN,
-    MAX_OCR_NOISE_RATIO,
-    MAX_TABLE_FRAGMENT_SIGNAL,
     MIN_AGENT_PAGE_TEXT_CHARACTERS,
-    MIN_AGENT_TEXT_CHARACTERS,
-    MIN_LINE_STRUCTURE_SIGNAL,
-    OCRMAC_LANGUAGE_ALIASES,
-    PREFERRED_AGENT_ARTIFACT,
     PROJECT_ROOT,
     SOURCE_DOCLING_JSON_NAME,
     SOURCE_IMAGES_NAME,
@@ -50,12 +37,27 @@ from .constants import (
     SOURCE_META_NAME,
     SPREADSHEET_INPUT_FORMATS,
     SPREADSHEET_INPUT_TYPES,
-    TOKEN_PATTERN,
     TEXT_NATIVE_INPUT_FORMATS,
     TEXT_NATIVE_INPUT_TYPES,
 )
 from .models import AttemptArtifacts, ImageSidecar, PageArtifacts, QualityReport
 from .routing import detect_input_type as _detect_input_type
+
+__all__ = [
+    "convert_document_to_ingestion_outputs",
+    "convert_pdf_to_sidecar_outputs",
+    "build_source_meta",
+    "detect_input_type",
+    "infer_source_title",
+]
+
+SOURCE_SIDECAR_NAMES = (
+    SOURCE_MARKDOWN_NAME,
+    SOURCE_DOCLING_JSON_NAME,
+    SOURCE_IMAGES_NAME,
+    SOURCE_MANIFEST_NAME,
+    SOURCE_META_NAME,
+)
 
 
 def detect_input_type(input_path: Path) -> str:
@@ -85,388 +87,6 @@ def build_source_meta(
     )
 
 
-def _picture_id(page_no: int | None, index: int) -> str:
-    return _artifact_helpers._picture_id(page_no, index)
-
-
-def _encode_image_base64(picture_item: Any, document: Any) -> tuple[str, str] | None:
-    return _artifact_helpers._encode_image_base64(picture_item, document)
-
-
-def _collect_picture_sidecars(document: Any) -> list[ImageSidecar]:
-    return _artifact_helpers._collect_picture_sidecars(
-        document,
-        encode_image_base64=_encode_image_base64,
-        picture_id_factory=_picture_id,
-    )
-
-
-def _group_pictures_by_page(
-    pictures: list[ImageSidecar],
-) -> dict[int, list[ImageSidecar]]:
-    return _artifact_helpers._group_pictures_by_page(pictures)
-
-
-def _inject_picture_placeholders(markdown_text: str, pictures: list[ImageSidecar]) -> str:
-    return _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
-
-
-def _export_structured_document(document: Any) -> dict[str, Any]:
-    return _artifact_helpers._export_structured_document(document)
-
-
-def _serialize_page_quality(
-    page_outputs: dict[int, PageArtifacts],
-) -> dict[str, QualityReport]:
-    return _manifest_helpers._serialize_page_quality(page_outputs)
-
-
-def _apply_artifact_authority(manifest: dict[str, Any]) -> dict[str, Any]:
-    return _manifest_helpers._apply_artifact_authority(manifest)
-
-
-def _build_attempt_manifest(
-    pdf_path: Path,
-    *,
-    input_type: str,
-    pipeline_family: str,
-    attempt_label: str,
-    status: str,
-    images: list[ImageSidecar],
-    markdown_text: str,
-    ocr_metadata: dict[str, Any] | None,
-    quality: QualityReport,
-    page_outputs: dict[int, PageArtifacts],
-    page_count: int | None = None,
-    remediated_pages: list[int] | None = None,
-) -> dict[str, Any]:
-    return _manifest_helpers._build_attempt_manifest(
-        pdf_path,
-        input_type=input_type,
-        pipeline_family=pipeline_family,
-        attempt_label=attempt_label,
-        status=status,
-        images=images,
-        markdown_text=markdown_text,
-        ocr_metadata=ocr_metadata,
-        quality=quality,
-        page_outputs=page_outputs,
-        page_count=page_count,
-        remediated_pages=remediated_pages,
-        serialize_page_quality=_serialize_page_quality,
-        apply_artifact_authority=_apply_artifact_authority,
-    )
-
-
-def _finalize_selected_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
-    return _manifest_helpers._finalize_selected_manifest(
-        manifest,
-        apply_artifact_authority=_apply_artifact_authority,
-    )
-
-
-def _normalize_ocr_languages(ocr_languages: list[str]) -> list[str]:
-    return _ocr_helpers._normalize_ocr_languages(ocr_languages)
-
-
-def _normalize_engine_languages(
-    ocr_engine: str,
-    ocr_languages: list[str],
-) -> list[str]:
-    return _ocr_helpers._normalize_engine_languages(
-        ocr_engine,
-        ocr_languages,
-        normalize_ocr_languages=_normalize_ocr_languages,
-    )
-
-
-def _build_ocr_options(
-    ocr_engine: str,
-    ocr_languages: list[str],
-    force_full_page_ocr: bool,
-):
-    return _ocr_helpers._build_ocr_options(
-        ocr_engine,
-        ocr_languages,
-        force_full_page_ocr,
-        normalize_engine_languages=_normalize_engine_languages,
-    )
-
-
-def _build_ocr_metadata(
-    *,
-    engine: str,
-    languages: list[str],
-    force_full_page_ocr: bool,
-    remediated_pages: list[int] | None = None,
-) -> dict[str, Any]:
-    return _ocr_helpers._build_ocr_metadata(
-        engine=engine,
-        languages=languages,
-        force_full_page_ocr=force_full_page_ocr,
-        remediated_pages=remediated_pages,
-    )
-
-
-def _build_remediation_plan(
-    ocr_engine: str,
-    ocr_languages: list[str],
-    primary_quality: dict[str, Any],
-    *,
-    force_full_page_ocr: bool = False,
-) -> dict[str, Any] | None:
-    return _ocr_helpers._build_remediation_plan(
-        ocr_engine,
-        ocr_languages,
-        primary_quality,
-        force_full_page_ocr=force_full_page_ocr,
-        build_ocr_remediation_config=_build_ocr_remediation_config,
-    )
-
-
-def _build_ocr_remediation_config(
-    ocr_engine: str,
-    ocr_languages: list[str],
-    *,
-    force_full_page_ocr: bool = False,
-) -> dict[str, Any] | None:
-    return _ocr_helpers._build_ocr_remediation_config(
-        ocr_engine,
-        ocr_languages,
-        force_full_page_ocr=force_full_page_ocr,
-        normalize_engine_languages=_normalize_engine_languages,
-    )
-
-
-def _build_page_remediation_plan(page_quality: dict[int, QualityReport]) -> list[int]:
-    return _ocr_helpers._build_page_remediation_plan(page_quality)
-
-
-def _compact_character_count(text: str) -> int:
-    return _quality_helpers._compact_character_count(text)
-
-
-def _strip_image_tokens(markdown_text: str) -> str:
-    return _quality_helpers._strip_image_tokens(markdown_text)
-
-
-def _assess_agent_quality(
-    markdown_text: str,
-    pictures: list[ImageSidecar],
-    page_count: int,
-    min_required_text: int | None = None,
-) -> dict[str, Any]:
-    return _quality_helpers._assess_agent_quality(
-        markdown_text,
-        pictures,
-        page_count,
-        min_required_text=min_required_text,
-        strip_image_tokens=_strip_image_tokens,
-        compact_character_count=_compact_character_count,
-        compute_content_trust_signals=_compute_content_trust_signals,
-    )
-
-
-def _assess_text_native_quality(
-    markdown_text: str,
-    pictures: list[ImageSidecar],
-    input_type: str,
-) -> dict[str, Any]:
-    return _quality_helpers._assess_text_native_quality(
-        markdown_text,
-        pictures,
-        input_type,
-        strip_image_tokens=_strip_image_tokens,
-        compact_character_count=_compact_character_count,
-        compute_text_native_structure_signals=_compute_text_native_structure_signals,
-        min_text_native_characters=_min_text_native_characters,
-        has_text_native_body_survival=_has_text_native_body_survival,
-        compute_content_trust_signals=_compute_content_trust_signals,
-    )
-
-
-def _assess_spreadsheet_quality(
-    markdown_text: str,
-    pictures: list[ImageSidecar],
-    structured_document: dict[str, Any],
-) -> dict[str, Any]:
-    return _quality_helpers._assess_spreadsheet_quality(
-        markdown_text,
-        pictures,
-        structured_document,
-        strip_image_tokens=_strip_image_tokens,
-        compact_spreadsheet_markdown_character_count=(
-            _compact_spreadsheet_markdown_character_count
-        ),
-        has_spreadsheet_table_content=_has_spreadsheet_table_content,
-        compute_content_trust_signals=_compute_content_trust_signals,
-    )
-
-
-def _compact_spreadsheet_markdown_character_count(markdown_text: str) -> int:
-    return _quality_helpers._compact_spreadsheet_markdown_character_count(markdown_text)
-
-
-def _has_spreadsheet_table_content(structured_document: dict[str, Any]) -> bool:
-    return _quality_helpers._has_spreadsheet_table_content(
-        structured_document,
-        compact_character_count=_compact_character_count,
-    )
-
-
-def _min_text_native_characters(
-    input_type: str,
-    *,
-    structure_signals: dict[str, int | bool] | None = None,
-) -> int:
-    return _quality_helpers._min_text_native_characters(
-        input_type,
-        structure_signals=structure_signals,
-        min_concise_structured_body_characters=_min_concise_structured_body_characters,
-    )
-
-
-def _min_text_native_body_characters(input_type: str) -> int:
-    return _quality_helpers._min_text_native_body_characters(input_type)
-
-
-def _min_concise_structured_body_characters(input_type: str) -> int:
-    return _quality_helpers._min_concise_structured_body_characters(input_type)
-
-
-def _count_lexical_tokens(lines: list[str]) -> int:
-    return _quality_helpers._count_lexical_tokens(lines)
-
-
-def _strip_list_marker(line: str) -> str:
-    return _quality_helpers._strip_list_marker(line)
-
-
-def _compute_text_native_structure_signals(
-    markdown_text: str,
-    *,
-    input_type: str,
-) -> dict[str, int | bool]:
-    return _quality_helpers._compute_text_native_structure_signals(
-        markdown_text,
-        input_type=input_type,
-        compact_character_count=_compact_character_count,
-        count_lexical_tokens=_count_lexical_tokens,
-        strip_list_marker=_strip_list_marker,
-        min_text_native_body_characters=_min_text_native_body_characters,
-        min_concise_structured_body_characters=_min_concise_structured_body_characters,
-    )
-
-
-def _has_text_native_body_survival(
-    input_type: str,
-    structure_signals: dict[str, int | bool],
-) -> bool:
-    return _quality_helpers._has_text_native_body_survival(input_type, structure_signals)
-
-
-def _normalize_analysis_line(line: str) -> str:
-    return _quality_helpers._normalize_analysis_line(line)
-
-
-def _iter_content_lines(markdown_text: str) -> list[str]:
-    return _quality_helpers._iter_content_lines(
-        markdown_text,
-        normalize_analysis_line=_normalize_analysis_line,
-    )
-
-
-def _is_cjk_character(character: str) -> bool:
-    return _quality_helpers._is_cjk_character(character)
-
-
-def _compute_ocr_noise_ratio(markdown_text: str) -> float:
-    return _quality_helpers._compute_ocr_noise_ratio(
-        markdown_text,
-        is_suspicious_token=_is_suspicious_token,
-    )
-
-
-def _is_suspicious_token(token: str) -> bool:
-    return _quality_helpers._is_suspicious_token(
-        token,
-        is_cjk_character=_is_cjk_character,
-    )
-
-
-def _compute_line_structure_signal(markdown_text: str) -> float:
-    return _quality_helpers._compute_line_structure_signal(
-        markdown_text,
-        iter_content_lines=_iter_content_lines,
-        compact_character_count=_compact_character_count,
-        is_coherent_line=_is_coherent_line,
-    )
-
-
-def _is_coherent_line(line: str, line_length: int) -> bool:
-    return _quality_helpers._is_coherent_line(
-        line,
-        line_length,
-        is_cjk_character=_is_cjk_character,
-    )
-
-
-def _compute_table_fragment_signal(markdown_text: str) -> float:
-    return _quality_helpers._compute_table_fragment_signal(
-        markdown_text,
-        iter_content_lines=_iter_content_lines,
-        compact_character_count=_compact_character_count,
-        looks_like_fragmented_table_line=_looks_like_fragmented_table_line,
-    )
-
-
-def _looks_like_fragmented_table_line(line: str) -> bool:
-    return _quality_helpers._looks_like_fragmented_table_line(line)
-
-
-def _compute_content_trust_signals(markdown_text: str) -> dict[str, float]:
-    return _quality_helpers._compute_content_trust_signals(
-        markdown_text,
-        compute_ocr_noise_ratio=_compute_ocr_noise_ratio,
-        compute_line_structure_signal=_compute_line_structure_signal,
-        compute_table_fragment_signal=_compute_table_fragment_signal,
-    )
-
-
-def _extract_spreadsheet_metadata(
-    structured_document: dict[str, Any],
-    *,
-    source_format: str | None = None,
-    normalized_from: str | None = None,
-) -> dict[str, Any]:
-    return _spreadsheet_helpers._extract_spreadsheet_metadata(
-        structured_document,
-        source_format=source_format,
-        normalized_from=normalized_from,
-    )
-
-
-def _spreadsheet_format_option(input_format: InputFormat):
-    return _spreadsheet_helpers._spreadsheet_format_option(input_format)
-
-
-def _safe_excel_sheet_title(title: str, fallback: str) -> str:
-    return _spreadsheet_helpers._safe_excel_sheet_title(title, fallback)
-
-
-def _xls_cell_value(book: Any, cell: Any) -> Any:
-    return _spreadsheet_helpers._xls_cell_value(book, cell)
-
-
-def _normalize_xls_to_xlsx(input_path: Path, output_path: Path) -> Path:
-    return _spreadsheet_helpers._normalize_xls_to_xlsx(
-        input_path,
-        output_path,
-        safe_excel_sheet_title=_safe_excel_sheet_title,
-        xls_cell_value=_xls_cell_value,
-    )
-
-
 def _assess_page_qualities(
     page_markdown: dict[int, str],
     pictures_by_page: dict[int, list[ImageSidecar]],
@@ -474,7 +94,7 @@ def _assess_page_qualities(
     page_quality: dict[int, QualityReport] = {}
 
     for page_no in sorted(page_markdown):
-        page_quality[page_no] = _assess_agent_quality(
+        page_quality[page_no] = _quality_helpers._assess_agent_quality(
             markdown_text=page_markdown[page_no],
             pictures=pictures_by_page.get(page_no, []),
             page_count=1,
@@ -489,7 +109,7 @@ def _collect_page_outputs(
     pictures: list[ImageSidecar],
     full_markdown_text: str,
 ) -> dict[int, PageArtifacts]:
-    pictures_by_page = _group_pictures_by_page(pictures)
+    pictures_by_page = _artifact_helpers._group_pictures_by_page(pictures)
     raw_page_markdown = _export_page_markdown(result)
     single_page_result = len(result.pages) == 1
 
@@ -500,7 +120,7 @@ def _collect_page_outputs(
         if single_page_result and not raw_markdown.strip() and full_markdown_text.strip():
             page_markdown[page_no] = full_markdown_text
         else:
-            page_markdown[page_no] = _inject_picture_placeholders(
+            page_markdown[page_no] = _artifact_helpers._inject_picture_placeholders(
                 raw_markdown,
                 pictures_by_page.get(page_no, []),
             )
@@ -580,7 +200,7 @@ def _assemble_attempt_from_pages(
         for page_no in ordered_page_nos
         for image in page_outputs[page_no].images
     ]
-    quality = _assess_agent_quality(
+    quality = _quality_helpers._assess_agent_quality(
         markdown_text=markdown_text,
         pictures=images,
         page_count=len(ordered_page_nos),
@@ -590,7 +210,7 @@ def _assemble_attempt_from_pages(
         fallback_document=fallback_document,
         original_document_name=original_document_name,
     )
-    manifest = _build_attempt_manifest(
+    manifest = _manifest_helpers._build_attempt_manifest(
         pdf_path,
         input_type="pdf",
         pipeline_family="standard_pdf",
@@ -662,7 +282,7 @@ def _merge_page_structured_documents(
         else DoclingDocument.concatenate(ordered_page_documents)
     )
     merged_document.name = original_document_name
-    return _export_structured_document(merged_document)
+    return _artifact_helpers._export_structured_document(merged_document)
 
 
 def _pick_better_attempt(
@@ -698,17 +318,17 @@ def _select_remediation_plan(
     ocr_languages: list[str],
     force_full_page_ocr: bool,
 ) -> tuple[list[int], dict[str, Any] | None]:
-    pages_to_remediate = _build_page_remediation_plan(
+    pages_to_remediate = _ocr_helpers._build_page_remediation_plan(
         _manifest_page_quality(primary_attempt.manifest)
     )
-    remediation_plan = _build_remediation_plan(
+    remediation_plan = _ocr_helpers._build_remediation_plan(
         ocr_engine=ocr_engine,
         ocr_languages=ocr_languages,
         primary_quality=primary_attempt.manifest["quality"],
         force_full_page_ocr=force_full_page_ocr,
     )
     if remediation_plan is None and pages_to_remediate:
-        remediation_plan = _build_ocr_remediation_config(
+        remediation_plan = _ocr_helpers._build_ocr_remediation_config(
             ocr_engine=ocr_engine,
             ocr_languages=ocr_languages,
             force_full_page_ocr=force_full_page_ocr,
@@ -744,7 +364,7 @@ def _remediate_pages(
     return _merge_page_attempts(
         primary_attempt,
         remediated_pages,
-        remediation_ocr_metadata=_build_ocr_metadata(
+        remediation_ocr_metadata=_ocr_helpers._build_ocr_metadata(
             engine=remediation_plan["ocr_engine"],
             languages=remediation_plan["ocr_languages"],
             force_full_page_ocr=remediation_plan["force_full_page_ocr"],
@@ -761,8 +381,11 @@ def _convert_single_attempt(
     attempt_label: str,
     page_range: tuple[int, int] | None = None,
 ) -> AttemptArtifacts:
-    normalized_languages = _normalize_engine_languages(ocr_engine, ocr_languages)
-    ocr_options = _build_ocr_options(
+    normalized_languages = _ocr_helpers._normalize_engine_languages(
+        ocr_engine,
+        ocr_languages,
+    )
+    ocr_options = _ocr_helpers._build_ocr_options(
         ocr_engine=ocr_engine,
         ocr_languages=normalized_languages,
         force_full_page_ocr=force_full_page_ocr,
@@ -789,18 +412,18 @@ def _convert_single_attempt(
     if result.status not in {ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS}:
         raise RuntimeError(f"Conversion failed with status: {result.status}")
 
-    pictures = _collect_picture_sidecars(result.document)
+    pictures = _artifact_helpers._collect_picture_sidecars(result.document)
     markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
-    markdown_text = _inject_picture_placeholders(markdown_text, pictures)
-    structured_document = _export_structured_document(result.document)
+    markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
+    structured_document = _artifact_helpers._export_structured_document(result.document)
     page_outputs = _collect_page_outputs(result, pictures, markdown_text)
-    quality = _assess_agent_quality(
+    quality = _quality_helpers._assess_agent_quality(
         markdown_text=markdown_text,
         pictures=pictures,
         page_count=len(result.pages),
     )
 
-    manifest = _build_attempt_manifest(
+    manifest = _manifest_helpers._build_attempt_manifest(
         pdf_path,
         input_type="pdf",
         pipeline_family="standard_pdf",
@@ -808,7 +431,7 @@ def _convert_single_attempt(
         status=result.status.value,
         images=pictures,
         markdown_text=markdown_text,
-        ocr_metadata=_build_ocr_metadata(
+        ocr_metadata=_ocr_helpers._build_ocr_metadata(
             engine=effective_engine,
             languages=normalized_languages,
             force_full_page_ocr=force_full_page_ocr,
@@ -884,16 +507,16 @@ def _convert_text_native_input(
     if result.status not in {ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS}:
         raise RuntimeError(f"Conversion failed with status: {result.status}")
 
-    pictures = _collect_picture_sidecars(result.document)
+    pictures = _artifact_helpers._collect_picture_sidecars(result.document)
     markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
-    markdown_text = _inject_picture_placeholders(markdown_text, pictures)
-    structured_document = _export_structured_document(result.document)
-    quality = _assess_text_native_quality(
+    markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
+    structured_document = _artifact_helpers._export_structured_document(result.document)
+    quality = _quality_helpers._assess_text_native_quality(
         markdown_text=markdown_text,
         pictures=pictures,
         input_type=input_type,
     )
-    manifest = _build_attempt_manifest(
+    manifest = _manifest_helpers._build_attempt_manifest(
         input_path,
         input_type=input_type,
         pipeline_family="simple",
@@ -931,7 +554,7 @@ def _convert_spreadsheet_input(
             temp_dir = tempfile.TemporaryDirectory()
             normalized_from = "xls"
             conversion_input_type = "xlsx"
-            conversion_path = _normalize_xls_to_xlsx(
+            conversion_path = _spreadsheet_helpers._normalize_xls_to_xlsx(
                 input_path,
                 Path(temp_dir.name) / f"{input_path.stem}.xlsx",
             )
@@ -940,32 +563,32 @@ def _convert_spreadsheet_input(
         converter = DocumentConverter(
             allowed_formats=[input_format],
             format_options={
-                input_format: _spreadsheet_format_option(input_format),
+                input_format: _spreadsheet_helpers._spreadsheet_format_option(input_format),
             },
         )
         result = converter.convert(str(conversion_path))
         if result.status not in {ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS}:
             raise RuntimeError(f"Conversion failed with status: {result.status}")
 
-        pictures = _collect_picture_sidecars(result.document)
+        pictures = _artifact_helpers._collect_picture_sidecars(result.document)
         markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
-        markdown_text = _inject_picture_placeholders(markdown_text, pictures)
-        structured_document = _export_structured_document(result.document)
+        markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
+        structured_document = _artifact_helpers._export_structured_document(result.document)
     finally:
         if temp_dir is not None:
             temp_dir.cleanup()
 
-    spreadsheet_metadata = _extract_spreadsheet_metadata(
+    spreadsheet_metadata = _spreadsheet_helpers._extract_spreadsheet_metadata(
         structured_document,
         source_format=input_type,
         normalized_from=normalized_from,
     )
-    quality = _assess_spreadsheet_quality(
+    quality = _quality_helpers._assess_spreadsheet_quality(
         markdown_text=markdown_text,
         pictures=pictures,
         structured_document=structured_document,
     )
-    manifest = _build_attempt_manifest(
+    manifest = _manifest_helpers._build_attempt_manifest(
         input_path,
         input_type=input_type,
         pipeline_family="spreadsheet",
@@ -1026,6 +649,51 @@ def _dispatch_conversion(
     )
 
 
+def _preflight_sidecar_publish_targets(output_dir: Path) -> None:
+    for filename in SOURCE_SIDECAR_NAMES:
+        target = output_dir / filename
+        if target.is_symlink() or (target.exists() and not target.is_file()):
+            raise RuntimeError(
+                f"Cannot publish sidecar {target}: target is not a regular file"
+            )
+
+
+def _write_sidecars_with_staging(
+    output_dir: Path,
+    *,
+    markdown_text: str,
+    structured_document: dict[str, Any],
+    images: list[ImageSidecar],
+    manifest: dict[str, Any],
+    meta: dict[str, Any],
+) -> None:
+    _preflight_sidecar_publish_targets(output_dir)
+
+    with tempfile.TemporaryDirectory(prefix=".docling-skill-", dir=output_dir) as tmp_dir:
+        staging_dir = Path(tmp_dir)
+        (staging_dir / SOURCE_MARKDOWN_NAME).write_text(markdown_text, encoding="utf-8")
+        (staging_dir / SOURCE_DOCLING_JSON_NAME).write_text(
+            json.dumps(structured_document, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (staging_dir / SOURCE_IMAGES_NAME).write_text(
+            json.dumps(images, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (staging_dir / SOURCE_MANIFEST_NAME).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (staging_dir / SOURCE_META_NAME).write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        _preflight_sidecar_publish_targets(output_dir)
+        for filename in SOURCE_SIDECAR_NAMES:
+            (staging_dir / filename).replace(output_dir / filename)
+
+
 def convert_document_to_ingestion_outputs(
     input_path: Path,
     output_dir: Path,
@@ -1037,7 +705,7 @@ def convert_document_to_ingestion_outputs(
     job_id: str | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    normalized_languages = _normalize_ocr_languages(ocr_languages or [])
+    normalized_languages = _ocr_helpers._normalize_ocr_languages(ocr_languages or [])
     input_type = detect_input_type(input_path)
 
     selected_attempt, attempts = _dispatch_conversion(
@@ -1055,35 +723,26 @@ def convert_document_to_ingestion_outputs(
     manifest_path = output_dir / SOURCE_MANIFEST_NAME
     meta_path = output_dir / SOURCE_META_NAME
 
-    markdown_path.write_text(selected_attempt.markdown_text, encoding="utf-8")
-    docling_json_path.write_text(
-        json.dumps(selected_attempt.structured_document, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    images_path.write_text(
-        json.dumps(selected_attempt.images, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
     manifest = {
-        **_finalize_selected_manifest(selected_attempt.manifest),
-        "attempts": [_apply_artifact_authority(attempt) for attempt in attempts],
+        **_manifest_helpers._finalize_selected_manifest(selected_attempt.manifest),
+        "attempts": [_manifest_helpers._apply_artifact_authority(attempt) for attempt in attempts],
         "selected_attempt": selected_attempt.manifest["attempt"],
         "ocr_remediation_applied": len(attempts) > 1,
     }
-    manifest_path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
     meta = build_source_meta(
         input_path=input_path,
         manifest=manifest,
         markdown_text=selected_attempt.markdown_text,
         job_id=job_id,
     )
-    meta_path.write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+
+    _write_sidecars_with_staging(
+        output_dir,
+        markdown_text=selected_attempt.markdown_text,
+        structured_document=selected_attempt.structured_document,
+        images=selected_attempt.images,
+        manifest=manifest,
+        meta=meta,
     )
 
     return {

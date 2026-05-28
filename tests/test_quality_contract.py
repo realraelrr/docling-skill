@@ -1,16 +1,18 @@
 import json
 
 from docling_skill.core import (
+    build_source_meta,
+)
+from docling_skill.artifacts import _export_structured_document
+from docling_skill.quality import (
     _assess_agent_quality,
     _assess_spreadsheet_quality,
     _assess_text_native_quality,
     _compute_line_structure_signal,
     _compute_ocr_noise_ratio,
     _compute_table_fragment_signal,
-    _extract_spreadsheet_metadata,
-    _export_structured_document,
-    build_source_meta,
 )
+from docling_skill.spreadsheet import _extract_spreadsheet_metadata
 
 
 def test_export_structured_document_prefers_export_to_dict():

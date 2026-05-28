@@ -10,7 +10,7 @@ Convert local documents into a stable `source.*` sidecar set for agent consumpti
 ## Preconditions
 - If you use the relative command, run from the `docling-skill` repo root.
 - Runtime: `conda` environment `docling`, or pip-installed `docling-skill` CLI.
-- Always provide an explicit output directory unless the user explicitly accepts `/tmp/docling-output`.
+- Always provide an explicit output directory.
 
 ## Command
 
@@ -172,4 +172,4 @@ Docling itself supports more formats upstream, but those remain out of scope for
 - Do not assume `selected_attempt` or a remediation attempt means the result is usable.
 - Do not treat `failed_for_agent` as clean ingestion; it can still contain a small readable preview.
 - Do not embed image base64 into Markdown manually; this tool already writes `source.images.json`.
-- Do not rely on the default output directory unless the user explicitly accepted it.
+- Do not omit the output directory.

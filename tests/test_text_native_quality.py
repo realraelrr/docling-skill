@@ -1,4 +1,4 @@
-from docling_skill.core import _assess_text_native_quality
+from docling_skill.quality import _assess_text_native_quality
 
 
 def test_text_native_quality_keeps_docx_heading_and_paragraph_output_good():

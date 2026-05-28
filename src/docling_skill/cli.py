@@ -51,9 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "output_dir",
-        nargs="?",
-        default="/tmp/docling-output",
-        help="Optional directory for source.md, source.docling.json, source.images.json, source.manifest.json, and source.meta.json.",
+        help="Explicit directory for source.md, source.docling.json, source.images.json, source.manifest.json, and source.meta.json.",
     )
     parser.add_argument(
         "--ocr-engine",

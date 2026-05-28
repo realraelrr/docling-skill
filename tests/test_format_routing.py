@@ -7,6 +7,7 @@ import pytest
 from docling.datamodel.base_models import ConversionStatus, InputFormat
 
 import docling_skill.core as core
+from docling_skill import artifacts as artifact_helpers
 
 
 def _fake_attempt(input_path: Path, *, input_type: str, pipeline_family: str) -> core.AttemptArtifacts:
@@ -558,7 +559,7 @@ def test_convert_text_native_txt_uses_string_conversion_path(
             return FakeResult()
 
     monkeypatch.setattr(core, "DocumentConverter", FakeConverter)
-    monkeypatch.setattr(core, "_collect_picture_sidecars", lambda document: [])
+    monkeypatch.setattr(artifact_helpers, "_collect_picture_sidecars", lambda document: [])
 
     attempt, attempts = core._convert_text_native_input(
         input_path,
