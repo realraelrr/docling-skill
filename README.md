@@ -40,14 +40,14 @@ complete source-to-Markdown alignment.
 ## Install
 
 ```bash
-pip install "git+https://github.com/realraelrr/docling-skill.git@v1.0.3"
+pip install "git+https://github.com/realraelrr/docling-skill.git@v1.1.0"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
 If your environment uses SOCKS proxies:
 
 ```bash
-pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v1.0.3"
+pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v1.1.0"
 ```
 
 For local development:

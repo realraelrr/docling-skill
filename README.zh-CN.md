@@ -33,14 +33,14 @@
 ## 安装
 
 ```bash
-pip install "git+https://github.com/realraelrr/docling-skill.git@v1.0.3"
+pip install "git+https://github.com/realraelrr/docling-skill.git@v1.1.0"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
 如果运行环境使用 SOCKS 代理：
 
 ```bash
-pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v1.0.3"
+pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v1.1.0"
 ```
 
 本地开发：
