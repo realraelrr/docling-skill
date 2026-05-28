@@ -1,3 +1,4 @@
+import importlib.metadata as package_metadata
 import json
 import tomllib
 from pathlib import Path
@@ -132,6 +133,30 @@ def _quality_report(*, status: str = "good", agent_ready: bool = True) -> dict[s
             "table_fragment_signal": 0.0,
         },
     }
+
+
+def _project_dependencies() -> list[str]:
+    pyproject_path = Path(core.PROJECT_ROOT / "pyproject.toml")
+    pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    return pyproject["project"]["dependencies"]
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    numeric_prefix = version.split("+", maxsplit=1)[0].split("-", maxsplit=1)[0]
+    return tuple(int(part) for part in numeric_prefix.split("."))
+
+
+def test_docling_dependency_tracks_v2_96_release():
+    dependencies = _project_dependencies()
+
+    assert "docling>=2.96.0,<2.97.0" in dependencies
+    assert "docling-core>=2.77.1,<3.0.0" in dependencies
+
+
+def test_installed_docling_runtime_satisfies_project_floor():
+    assert _version_tuple(package_metadata.version("docling")) >= (2, 96, 0)
+    assert _version_tuple(package_metadata.version("docling-core")) >= (2, 77, 1)
+    assert _version_tuple(package_metadata.version("docling-parse")) >= (6, 2, 0)
 
 
 def test_cli_re_exports_core_entrypoints():
