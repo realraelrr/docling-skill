@@ -21,8 +21,8 @@ Each successful conversion writes:
 | Artifact | Purpose |
 | --- | --- |
 | `source.manifest.json` | Quality risk, routing, remediation, and evidence metadata |
-| `source.md` | Default agent-readable Markdown |
-| `source.docling.json` | Authoritative structured Docling export from the same conversion result |
+| `source.md` | Default agent-readable Markdown, with narrow CJK cleanup applied for agent use |
+| `source.docling.json` | Authoritative structured Docling export from the same conversion result; kept as Docling's structured output |
 | `source.images.json` | Always-written image sidecar list; empty when extraction is unavailable or no images are found |
 | `source.meta.json` | Lightweight ingestion metadata for downstream workflows |
 
@@ -36,7 +36,17 @@ Downstream rule:
 
 The automatic quality model is a risk screen, not a semantic audit. A low-risk
 result means no hard failure was detected; it does not prove source fidelity or
-complete source-to-Markdown alignment.
+complete source-to-Markdown alignment. Medium-risk `good` output is still
+agent-usable by default, but its `warnings` and `signals` should be inspected.
+For long PDFs, isolated page failures can be downgraded to medium risk instead
+of hard failure; inspect `quality.signals.page_coverage`, especially
+`first_page_failed`, before relying on front matter, title, or abstract text.
+
+For Chinese-heavy documents, `source.md` receives targeted Markdown cleanup for
+CJK compatibility glyphs and abnormal spaces between Chinese characters. The
+manifest records this under `quality.signals.text_normalization`, while
+`source.docling.json` remains the structured Docling export for recovery and
+deeper inspection.
 
 Image inputs use the same agent-readiness gate as OCR-oriented extraction. An
 image-only result with no usable OCR text is reported as high risk and

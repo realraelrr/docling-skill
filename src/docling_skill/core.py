@@ -27,6 +27,7 @@ from . import manifest as _manifest_helpers
 from . import ocr as _ocr_helpers
 from . import quality as _quality_helpers
 from . import spreadsheet as _spreadsheet_helpers
+from . import text_normalization as _text_normalization_helpers
 from .constants import (
     MIN_AGENT_PAGE_TEXT_CHARACTERS,
     PROJECT_ROOT,
@@ -64,6 +65,33 @@ SOURCE_SIDECAR_NAMES = (
 )
 
 
+EMPTY_TEXT_NORMALIZATION_REPORT = {
+    "applied": False,
+    "cjk_compatibility_replacement_count": 0,
+    "cjk_space_merge_count": 0,
+}
+
+
+def _normalize_agent_markdown(markdown_text: str) -> tuple[str, dict[str, Any]]:
+    return _text_normalization_helpers.normalize_agent_markdown(markdown_text)
+
+
+def _aggregate_page_text_normalization(page_outputs: dict[int, PageArtifacts]) -> dict[str, Any]:
+    aggregate = dict(EMPTY_TEXT_NORMALIZATION_REPORT)
+    for page_output in page_outputs.values():
+        signal = page_output.quality.get("signals", {}).get("text_normalization", {})
+        aggregate["cjk_compatibility_replacement_count"] += signal.get(
+            "cjk_compatibility_replacement_count",
+            0,
+        )
+        aggregate["cjk_space_merge_count"] += signal.get("cjk_space_merge_count", 0)
+    aggregate["applied"] = bool(
+        aggregate["cjk_compatibility_replacement_count"]
+        or aggregate["cjk_space_merge_count"]
+    )
+    return aggregate
+
+
 def detect_input_type(input_path: Path) -> str:
     return _detect_input_type(input_path)
 
@@ -94,6 +122,7 @@ def build_source_meta(
 def _assess_page_qualities(
     page_markdown: dict[int, str],
     pictures_by_page: dict[int, list[ImageSidecar]],
+    normalization_by_page: dict[int, dict[str, Any]],
 ) -> dict[int, QualityReport]:
     page_quality: dict[int, QualityReport] = {}
 
@@ -103,6 +132,10 @@ def _assess_page_qualities(
             pictures=pictures_by_page.get(page_no, []),
             page_count=1,
             min_required_text=MIN_AGENT_PAGE_TEXT_CHARACTERS,
+        )
+        page_quality[page_no] = _quality_helpers._apply_text_normalization_signal(
+            page_quality[page_no],
+            normalization_by_page.get(page_no, EMPTY_TEXT_NORMALIZATION_REPORT),
         )
 
     return page_quality
@@ -118,20 +151,23 @@ def _collect_page_outputs(
     single_page_result = len(result.pages) == 1
 
     page_markdown: dict[int, str] = {}
+    normalization_by_page: dict[int, dict[str, Any]] = {}
     for page in result.pages:
         page_no = page.page_no
         raw_markdown = raw_page_markdown.get(page_no, "")
         if single_page_result and not raw_markdown.strip() and full_markdown_text.strip():
-            page_markdown[page_no] = full_markdown_text
+            page_text = full_markdown_text
         else:
-            page_markdown[page_no] = _artifact_helpers._inject_picture_placeholders(
+            page_text = _artifact_helpers._inject_picture_placeholders(
                 raw_markdown,
                 pictures_by_page.get(page_no, []),
             )
+        page_markdown[page_no], normalization_by_page[page_no] = _normalize_agent_markdown(page_text)
 
     page_quality = _assess_page_qualities(
         page_markdown=page_markdown,
         pictures_by_page=pictures_by_page,
+        normalization_by_page=normalization_by_page,
     )
 
     return {
@@ -215,6 +251,10 @@ def _assemble_attempt_from_pages(
             page_no: page_outputs[page_no].quality
             for page_no in ordered_page_nos
         },
+    )
+    quality = _quality_helpers._apply_text_normalization_signal(
+        quality,
+        _aggregate_page_text_normalization(page_outputs),
     )
     structured_document = _merge_page_structured_documents(
         page_outputs,
@@ -426,6 +466,7 @@ def _convert_single_attempt(
     pictures = _artifact_helpers._collect_picture_sidecars(result.document)
     markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
     markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
+    markdown_text, normalization_report = _normalize_agent_markdown(markdown_text)
     structured_document = _artifact_helpers._export_structured_document(result.document)
     page_outputs = _collect_page_outputs(result, pictures, markdown_text)
     quality = _quality_helpers._assess_agent_quality(
@@ -439,6 +480,10 @@ def _convert_single_attempt(
             page_no: page_output.quality
             for page_no, page_output in page_outputs.items()
         },
+    )
+    quality = _quality_helpers._apply_text_normalization_signal(
+        quality,
+        normalization_report,
     )
 
     manifest = _manifest_helpers._build_attempt_manifest(
@@ -528,11 +573,16 @@ def _convert_text_native_input(
     pictures = _artifact_helpers._collect_picture_sidecars(result.document)
     markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
     markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
+    markdown_text, normalization_report = _normalize_agent_markdown(markdown_text)
     structured_document = _artifact_helpers._export_structured_document(result.document)
     quality = _quality_helpers._assess_text_native_quality(
         markdown_text=markdown_text,
         pictures=pictures,
         input_type=input_type,
+    )
+    quality = _quality_helpers._apply_text_normalization_signal(
+        quality,
+        normalization_report,
     )
     manifest = _manifest_helpers._build_attempt_manifest(
         input_path,
@@ -572,12 +622,17 @@ def _convert_presentation_input(
     pictures = _artifact_helpers._collect_picture_sidecars(result.document)
     markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
     markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
+    markdown_text, normalization_report = _normalize_agent_markdown(markdown_text)
     structured_document = _artifact_helpers._export_structured_document(result.document)
     page_count = _presentation_page_count(structured_document, result)
     quality = _quality_helpers._assess_text_native_quality(
         markdown_text=markdown_text,
         pictures=pictures,
         input_type=input_type,
+    )
+    quality = _quality_helpers._apply_text_normalization_signal(
+        quality,
+        normalization_report,
     )
     manifest = _manifest_helpers._build_attempt_manifest(
         input_path,
@@ -626,12 +681,17 @@ def _convert_image_input(
     pictures = _artifact_helpers._collect_picture_sidecars(result.document)
     markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
     markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
+    markdown_text, normalization_report = _normalize_agent_markdown(markdown_text)
     structured_document = _artifact_helpers._export_structured_document(result.document)
     page_count = max(len(getattr(result, "pages", [])), 1)
     quality = _quality_helpers._assess_agent_quality(
         markdown_text=markdown_text,
         pictures=pictures,
         page_count=page_count,
+    )
+    quality = _quality_helpers._apply_text_normalization_signal(
+        quality,
+        normalization_report,
     )
     manifest = _manifest_helpers._build_attempt_manifest(
         input_path,
@@ -690,6 +750,7 @@ def _convert_spreadsheet_input(
         pictures = _artifact_helpers._collect_picture_sidecars(result.document)
         markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
         markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
+        markdown_text, normalization_report = _normalize_agent_markdown(markdown_text)
         structured_document = _artifact_helpers._export_structured_document(result.document)
     finally:
         if temp_dir is not None:
@@ -704,6 +765,10 @@ def _convert_spreadsheet_input(
         markdown_text=markdown_text,
         pictures=pictures,
         structured_document=structured_document,
+    )
+    quality = _quality_helpers._apply_text_normalization_signal(
+        quality,
+        normalization_report,
     )
     manifest = _manifest_helpers._build_attempt_manifest(
         input_path,

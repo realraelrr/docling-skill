@@ -8,6 +8,7 @@ from docling_skill.quality import (
     _assess_agent_quality,
     _assess_spreadsheet_quality,
     _assess_text_native_quality,
+    _compute_text_integrity_signal,
     _compute_line_structure_signal,
     _compute_ocr_noise_ratio,
     _compute_table_fragment_signal,
@@ -117,6 +118,80 @@ def test_assess_agent_quality_warns_on_repetitive_text_without_hard_failure():
     assert quality["risk_level"] == "medium"
     assert "repetitive_text" in quality["warnings"]
     assert quality["signals"]["repetition"]["status"] == "warn"
+
+
+def test_compute_text_integrity_signal_counts_replacement_compatibility_and_formulas():
+    signal = _compute_text_integrity_signal(
+        "周志华老师�。\n\n仍有⽠字。\n\n<!-- formula-not-decoded -->"
+    )
+
+    assert signal["replacement_character_count"] == 1
+    assert signal["remaining_cjk_compatibility_count"] == 1
+    assert signal["formula_not_decoded_count"] == 1
+
+
+def test_assess_agent_quality_warns_on_formula_and_small_replacement_noise():
+    quality = _assess_agent_quality(
+        markdown_text=(
+            "这是一段足够长的中文正文，用来模拟转换后的内容可以作为默认输入。"
+            "它包含少量替换字符�，还包含公式占位。"
+            "后续还有多段自然语言内容，用来确保最低文本覆盖门禁不会把这个样本误判为空。"
+            "这些内容本身是可读的，只是需要提示人工或 agent 注意部分公式和个别坏字符。\n\n"
+            "<!-- formula-not-decoded -->"
+        ),
+        pictures=[],
+        page_count=1,
+    )
+
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["risk_level"] == "medium"
+    assert "replacement_characters" in quality["warnings"]
+    assert "formula_not_decoded" in quality["warnings"]
+    assert quality["signals"]["text_integrity"]["replacement_character_count"] == 1
+    assert quality["signals"]["text_integrity"]["formula_not_decoded_count"] == 1
+
+
+def test_assess_text_native_quality_rejects_formula_only_markdown():
+    quality = _assess_text_native_quality(
+        markdown_text="<!-- formula-not-decoded -->",
+        pictures=[],
+        input_type="md",
+    )
+
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert quality["risk_level"] == "high"
+    assert "low_text_content" in quality["reasons"]
+    assert "formula_not_decoded" in quality["warnings"]
+    assert quality["signals"]["text_integrity"]["formula_not_decoded_count"] == 1
+
+
+def test_assess_agent_quality_keeps_tiny_replacement_noise_as_signal_only():
+    quality = _assess_agent_quality(
+        markdown_text=("这是一段稳定的中文正文，用于模拟较长的可读转换结果。" * 200) + "�",
+        pictures=[],
+        page_count=1,
+    )
+
+    assert quality["status"] == "good"
+    assert quality["agent_ready"] is True
+    assert quality["risk_level"] == "low"
+    assert "replacement_characters" not in quality["warnings"]
+    assert quality["signals"]["text_integrity"]["replacement_character_count"] == 1
+
+
+def test_assess_agent_quality_fails_on_excessive_replacement_characters():
+    quality = _assess_agent_quality(
+        markdown_text=("自然语言正文" * 30) + ("�" * 60),
+        pictures=[],
+        page_count=1,
+    )
+
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert quality["risk_level"] == "high"
+    assert "excessive_replacement_characters" in quality["reasons"]
 
 
 def test_assess_text_native_quality_accepts_short_nonempty_markdown():
