@@ -35,6 +35,9 @@ The automatic quality model is a risk screen, not a semantic audit. A low-risk
 result means no hard failure was detected; it does not prove source fidelity or
 complete source-to-Markdown alignment. Medium-risk `good` output is still
 agent-usable by default, but its `warnings` and `signals` should be inspected.
+For long PDFs, isolated page failures can be downgraded to medium risk instead
+of hard failure; inspect `quality.signals.page_coverage`, especially
+`first_page_failed`, before relying on front matter, title, or abstract text.
 
 For Chinese-heavy documents, `source.md` receives targeted Markdown cleanup for
 CJK compatibility glyphs and abnormal spaces between Chinese characters. The

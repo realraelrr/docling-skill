@@ -152,6 +152,21 @@ def test_assess_agent_quality_warns_on_formula_and_small_replacement_noise():
     assert quality["signals"]["text_integrity"]["formula_not_decoded_count"] == 1
 
 
+def test_assess_text_native_quality_rejects_formula_only_markdown():
+    quality = _assess_text_native_quality(
+        markdown_text="<!-- formula-not-decoded -->",
+        pictures=[],
+        input_type="md",
+    )
+
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert quality["risk_level"] == "high"
+    assert "low_text_content" in quality["reasons"]
+    assert "formula_not_decoded" in quality["warnings"]
+    assert quality["signals"]["text_integrity"]["formula_not_decoded_count"] == 1
+
+
 def test_assess_agent_quality_keeps_tiny_replacement_noise_as_signal_only():
     quality = _assess_agent_quality(
         markdown_text=("这是一段稳定的中文正文，用于模拟较长的可读转换结果。" * 200) + "�",

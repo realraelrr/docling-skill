@@ -103,6 +103,7 @@ python3 -c 'import json, pathlib; p = pathlib.Path("PATH_TO_MANIFEST"); m = json
    - `failed_for_agent`: do not present it as clean ingestion; report the failure and the manifest reasons.
    - `agent_ready: true` means `source.md` is a default agent input; it does not prove semantic fidelity.
    - For Chinese-heavy output, inspect `signals.text_normalization` and `signals.text_integrity` for CJK glyph cleanup, bad replacement characters, and formula placeholders.
+   - For PDFs with page warnings, inspect `signals.page_coverage.failed_pages` and `signals.page_coverage.first_page_failed`; long documents can be medium risk when only isolated pages failed.
    - For text-native inputs, `good` means minimum usable structure survived in Markdown; it is not just "the parse succeeded" or "the Markdown is non-empty."
    - For `docx`, `html`, and `md`, accept surviving paragraph/body structure, including concise body text, or preserved list structure when the list is the document's real content; `txt` stays looser.
 5. Treat `manifest["preferred_agent_artifact"]` as the default agent entrypoint. In this contract that is always `source.md`.

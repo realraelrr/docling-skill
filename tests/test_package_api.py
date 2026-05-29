@@ -588,7 +588,9 @@ def test_pdf_attempt_warns_when_first_page_fails_in_long_document(tmp_path):
     assert quality["agent_ready"] is True
     assert quality["risk_level"] == "medium"
     assert "partial_page_quality_failed" in quality["warnings"]
+    assert "first_page_quality_failed" in quality["warnings"]
     assert quality["signals"]["page_coverage"]["failed_pages"] == [1]
+    assert quality["signals"]["page_coverage"]["first_page_failed"] is True
 
 
 def test_pdf_attempt_fails_when_first_page_quality_fails(tmp_path):

@@ -230,8 +230,9 @@ def _assess_agent_quality(
     if strip_image_tokens is None:
         strip_image_tokens = _strip_image_tokens
     placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
-    text_without_placeholders = strip_image_tokens(markdown_text)
-    non_placeholder_characters = compact_character_count(text_without_placeholders)
+    text_without_images = strip_image_tokens(markdown_text)
+    text_for_quality = _strip_formula_placeholders(text_without_images)
+    non_placeholder_characters = compact_character_count(text_for_quality)
     required_text = (
         min_required_text
         if min_required_text is not None
@@ -239,9 +240,9 @@ def _assess_agent_quality(
     )
     if compute_content_trust_signals is None:
         compute_content_trust_signals = _compute_content_trust_signals
-    content_trust = compute_content_trust_signals(text_without_placeholders)
-    repetition_signal = _compute_repetition_signal(text_without_placeholders)
-    text_integrity_signal = _compute_text_integrity_signal(text_without_placeholders)
+    content_trust = compute_content_trust_signals(text_for_quality)
+    repetition_signal = _compute_repetition_signal(text_for_quality)
+    text_integrity_signal = _compute_text_integrity_signal(text_without_images)
 
     reasons: list[str] = []
     if non_placeholder_characters < required_text:
@@ -320,19 +321,20 @@ def _assess_text_native_quality(
     if has_text_native_body_survival is None:
         has_text_native_body_survival = _has_text_native_body_survival
     placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
-    text_without_placeholders = strip_image_tokens(markdown_text)
-    non_placeholder_characters = compact_character_count(text_without_placeholders)
+    text_without_images = strip_image_tokens(markdown_text)
+    text_for_quality = _strip_formula_placeholders(text_without_images)
+    non_placeholder_characters = compact_character_count(text_for_quality)
     if compute_text_native_structure_signals is None:
         compute_text_native_structure_signals = _compute_text_native_structure_signals
     if min_text_native_characters is None:
         min_text_native_characters = _min_text_native_characters
     if compute_content_trust_signals is None:
         compute_content_trust_signals = _compute_content_trust_signals
-    content_trust = compute_content_trust_signals(text_without_placeholders)
-    repetition_signal = _compute_repetition_signal(text_without_placeholders)
-    text_integrity_signal = _compute_text_integrity_signal(text_without_placeholders)
+    content_trust = compute_content_trust_signals(text_for_quality)
+    repetition_signal = _compute_repetition_signal(text_for_quality)
+    text_integrity_signal = _compute_text_integrity_signal(text_without_images)
     structure_signals = compute_text_native_structure_signals(
-        text_without_placeholders,
+        text_for_quality,
         input_type=input_type,
     )
     required_text = min_text_native_characters(
@@ -412,16 +414,17 @@ def _assess_spreadsheet_quality(
             _compact_spreadsheet_markdown_character_count
         )
     placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
-    text_without_placeholders = strip_image_tokens(markdown_text)
+    text_without_images = strip_image_tokens(markdown_text)
+    text_for_quality = _strip_formula_placeholders(text_without_images)
     non_placeholder_characters = compact_spreadsheet_markdown_character_count(
-        text_without_placeholders
+        text_for_quality
     )
     if has_spreadsheet_table_content is None:
         has_spreadsheet_table_content = _has_spreadsheet_table_content
     if compute_content_trust_signals is None:
         compute_content_trust_signals = _compute_content_trust_signals
-    content_trust = compute_content_trust_signals(text_without_placeholders)
-    text_integrity_signal = _compute_text_integrity_signal(text_without_placeholders)
+    content_trust = compute_content_trust_signals(text_for_quality)
+    text_integrity_signal = _compute_text_integrity_signal(text_without_images)
     table_signals = _compute_spreadsheet_table_signals(structured_document)
     has_table_structure = has_spreadsheet_table_content(structured_document)
 
@@ -587,6 +590,7 @@ def _apply_page_quality_risk(
         "failed_page_count": len(failed_pages),
         "failed_page_ratio": failed_page_ratio,
         "failed_pages": failed_pages,
+        "first_page_failed": 1 in failed_pages,
     }
     quality["signals"]["page_coverage"] = page_signal
 
@@ -597,12 +601,18 @@ def _apply_page_quality_risk(
         _raise_quality_risk(quality, "high")
     elif failed_pages:
         _add_quality_warning(quality, "partial_page_quality_failed")
+        if 1 in failed_pages:
+            _add_quality_warning(quality, "first_page_quality_failed")
 
     return quality
 
 
 def _strip_image_tokens(markdown_text: str) -> str:
     return IMAGE_TOKEN_PATTERN.sub("", markdown_text)
+
+
+def _strip_formula_placeholders(markdown_text: str) -> str:
+    return markdown_text.replace(FORMULA_NOT_DECODED_PLACEHOLDER, "")
 
 
 def _min_text_native_characters(
