@@ -57,14 +57,14 @@ image-only result with no usable OCR text is reported as high risk and
 ## Install
 
 ```bash
-pip install "git+https://github.com/realraelrr/docling-skill.git@v1.1.0"
+pip install "git+https://github.com/realraelrr/docling-skill.git@v1.2.0"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
 If your environment uses SOCKS proxies:
 
 ```bash
-pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v1.1.0"
+pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v1.2.0"
 ```
 
 For local development:

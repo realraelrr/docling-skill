@@ -6,4 +6,4 @@ __all__ = [
     "convert_document_to_ingestion_outputs",
     "convert_pdf_to_sidecar_outputs",
 ]
-__version__ = "1.1.0"
+__version__ = "1.2.0"
