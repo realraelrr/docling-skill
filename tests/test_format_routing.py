@@ -386,6 +386,26 @@ def test_convert_document_smoke_converts_real_docx_file(tmp_path: Path):
     assert outputs["manifest"]["quality"]["reasons"] == []
 
 
+def test_convert_document_normalizes_agent_markdown_and_records_signal(tmp_path: Path):
+    input_path = tmp_path / "sample.md"
+    input_path.write_text(
+        "# 南 ⽠ 书\n\n周志华⽼师提醒读 者关注正文质量。\n",
+        encoding="utf-8",
+    )
+
+    outputs = core.convert_document_to_ingestion_outputs(
+        input_path=input_path,
+        output_dir=tmp_path / "out-normalized-md",
+    )
+
+    assert "南瓜书" in outputs["markdown_text"]
+    assert "周志华老师提醒读者" in outputs["markdown_text"]
+    normalization = outputs["manifest"]["quality"]["signals"]["text_normalization"]
+    assert normalization["applied"] is True
+    assert normalization["cjk_compatibility_replacement_count"] >= 2
+    assert normalization["cjk_space_merge_count"] >= 1
+
+
 def test_convert_document_smoke_converts_real_xlsx_file_with_merged_cells(tmp_path: Path):
     openpyxl = pytest.importorskip("openpyxl")
     workbook = openpyxl.Workbook()

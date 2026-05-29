@@ -13,8 +13,8 @@
 | Artifact | 用途 |
 | --- | --- |
 | `source.manifest.json` | 质量风险、路由、补救路径和证据元数据 |
-| `source.md` | Agent 默认读取的 Markdown |
-| `source.docling.json` | 与 `source.md` 来自同一次转换结果的权威 Docling 结构化导出 |
+| `source.md` | Agent 默认读取的 Markdown，会做有限 CJK 清洗 |
+| `source.docling.json` | 与 `source.md` 来自同一次转换结果的权威 Docling 结构化导出，保留 Docling 结构输出 |
 | `source.images.json` | 始终写出的图片 sidecar 列表；无法提图或没有图片时为空数组 |
 | `source.meta.json` | 供下游 workflow 使用的轻量 ingestion 元数据 |
 
@@ -26,7 +26,9 @@
 4. 需要结构恢复、校正 Markdown 歧义或深入检查时，读取 `source.docling.json`。
 5. 通过 `source.images.json` 解析 `[[image:picture-p2-1]]` 这类图片占位符。
 
-自动质量模型只是风险筛查，不是语义审校。低风险表示没有检测到硬失败，不代表已经证明源文档语义保真或完整对齐。
+自动质量模型只是风险筛查，不是语义审校。低风险表示没有检测到硬失败，不代表已经证明源文档语义保真或完整对齐。`good/medium` 表示默认可作为 agent 输入，但需要检查 `warnings` 和 `signals`。
+
+对于中文为主的文档，`source.md` 会定向修正 CJK 兼容字形和中文字符之间的异常空格；对应证据记录在 `quality.signals.text_normalization`。`source.docling.json` 仍保留 Docling 的结构化导出，用于恢复和深入检查。
 
 `docling-skill` 不负责远程 URL 抓取、文档 chunking，也不输出标签、关键词、分类、摘要等下游知识库字段。
 

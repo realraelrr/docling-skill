@@ -471,7 +471,7 @@ def test_pdf_remediation_selection_preserves_salvaged_manifest(tmp_path, monkeyp
     assert meta["quality_status"] == "salvaged"
 
 
-def test_pdf_attempt_marks_nonfatal_failed_page_as_medium_risk(tmp_path):
+def test_pdf_attempt_fails_when_page_quality_fails_in_short_document(tmp_path):
     input_path = tmp_path / "example.pdf"
     page_one_doc = _structured_page_document(
         name="page-1",
@@ -532,11 +532,63 @@ def test_pdf_attempt_marks_nonfatal_failed_page_as_medium_risk(tmp_path):
     )
 
     quality = attempt.manifest["quality"]
+    assert quality["status"] == "failed_for_agent"
+    assert quality["agent_ready"] is False
+    assert quality["risk_level"] == "high"
+    assert "page_quality_failed" in quality["reasons"]
+    assert quality["signals"]["page_coverage"]["failed_pages"] == [2]
+
+
+def test_pdf_attempt_warns_when_first_page_fails_in_long_document(tmp_path):
+    input_path = tmp_path / "example.pdf"
+    page_outputs: dict[int, core.PageArtifacts] = {}
+    documents = []
+    for page_no in range(1, 11):
+        page_doc = _structured_page_document(
+            name=f"page-{page_no}",
+            page_no=page_no,
+            text=f"Page {page_no}",
+        )
+        documents.append(DoclingDocument.model_validate(page_doc))
+        page_outputs[page_no] = core.PageArtifacts(
+            markdown_text=(
+                "thin"
+                if page_no == 1
+                else f"Readable page {page_no} with enough natural text. " * 5
+            ),
+            images=[],
+            quality=_quality_report(
+                status="failed_for_agent",
+                agent_ready=False,
+            )
+            if page_no == 1
+            else _quality_report(),
+            structured_document=page_doc,
+        )
+    fallback_document = DoclingDocument.concatenate(documents)
+    fallback_document.name = input_path.name
+
+    attempt = core._assemble_attempt_from_pages(
+        input_path,
+        page_outputs=page_outputs,
+        fallback_document=fallback_document,
+        original_document_name=input_path.name,
+        attempt_label="primary",
+        status="success",
+        ocr_metadata={
+            "enabled": True,
+            "engine": "tesseract",
+            "languages": ["eng"],
+            "force_full_page_ocr": False,
+        },
+    )
+
+    quality = attempt.manifest["quality"]
     assert quality["status"] == "good"
     assert quality["agent_ready"] is True
     assert quality["risk_level"] == "medium"
-    assert "page_quality_failed" in quality["warnings"]
-    assert quality["signals"]["page_coverage"]["failed_pages"] == [2]
+    assert "partial_page_quality_failed" in quality["warnings"]
+    assert quality["signals"]["page_coverage"]["failed_pages"] == [1]
 
 
 def test_pdf_attempt_fails_when_first_page_quality_fails(tmp_path):

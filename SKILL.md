@@ -57,8 +57,8 @@ Use `source.manifest.json` before consuming any other output.
 Artifact roles:
 
 - `source.manifest.json`: Quality risk, routing, remediation, `preferred_agent_artifact`, `authoritative_artifact`, `available_artifacts`, selected attempt metadata, and evidence signals.
-- `source.md`: Default agent-readable Markdown. Image placeholders appear as `[[image:picture-p3-0]]`.
-- `source.docling.json`: Authoritative structured Docling export from the same conversion result as `source.md`; use for recovery, machine-readable structure, or deeper inspection.
+- `source.md`: Default agent-readable Markdown. Image placeholders appear as `[[image:picture-p3-0]]`. Narrow CJK cleanup may be applied here for agent readability.
+- `source.docling.json`: Authoritative structured Docling export from the same conversion result as `source.md`; use for recovery, machine-readable structure, or deeper inspection. It is not rewritten by the CJK Markdown cleanup.
 - `source.images.json`: Extracted image sidecars with `id`, `placeholder`, `page_no`, `bbox`, `mime_type`, and `base64` when image extraction is available.
 - `source.meta.json`: Ingestion metadata only: `job_id`, `input_type`, `source_title`, `source_url`, `source_attachment`, `author`, `published_at`, `extractor`, `pipeline_family`, `quality_status`, `quality_reasons`, and `char_count`.
 
@@ -98,10 +98,11 @@ python3 -c 'import json, pathlib; p = pathlib.Path("PATH_TO_MANIFEST"); m = json
 3. Read `source.manifest.json` before consuming `source.md`.
 4. Decide from `manifest["quality"]`:
    - `good` with `risk_level: low`: no hard failure was detected; use `source.md` as the primary text artifact.
-   - `good` with `risk_level: medium`: use `source.md` only after checking `warnings` and `signals`.
+   - `good` with `risk_level: medium`: `source.md` is default-usable, but check `warnings` and `signals` before relying on it.
    - `salvaged`: use `source.md`, but treat it as OCR-remediated and medium risk.
    - `failed_for_agent`: do not present it as clean ingestion; report the failure and the manifest reasons.
    - `agent_ready: true` means `source.md` is a default agent input; it does not prove semantic fidelity.
+   - For Chinese-heavy output, inspect `signals.text_normalization` and `signals.text_integrity` for CJK glyph cleanup, bad replacement characters, and formula placeholders.
    - For text-native inputs, `good` means minimum usable structure survived in Markdown; it is not just "the parse succeeded" or "the Markdown is non-empty."
    - For `docx`, `html`, and `md`, accept surviving paragraph/body structure, including concise body text, or preserved list structure when the list is the document's real content; `txt` stays looser.
 5. Treat `manifest["preferred_agent_artifact"]` as the default agent entrypoint. In this contract that is always `source.md`.

@@ -27,6 +27,11 @@ RISK_LEVELS = ("low", "medium", "high")
 RISK_RANK = {level: rank for rank, level in enumerate(RISK_LEVELS)}
 MIN_REPETITION_TOKENS = 20
 MAX_REPETITIVE_TOKEN_RATIO = 0.5
+MIN_REPLACEMENT_WARNING_COUNT = 5
+MIN_REPLACEMENT_WARNING_RATIO = 0.001
+MIN_REPLACEMENT_FAILURE_COUNT = 50
+MIN_REPLACEMENT_FAILURE_RATIO = 0.01
+FORMULA_NOT_DECODED_PLACEHOLDER = "<!-- formula-not-decoded -->"
 
 
 def _compact_character_count(text: str) -> int:
@@ -139,6 +144,79 @@ def _compute_repetition_signal(markdown_text: str) -> dict[str, Any]:
     }
 
 
+def _is_cjk_compatibility_character(character: str) -> bool:
+    codepoint = ord(character)
+    return (
+        0x2E80 <= codepoint <= 0x2EFF
+        or 0x2F00 <= codepoint <= 0x2FDF
+        or 0xF900 <= codepoint <= 0xFAFF
+    )
+
+
+def _compute_text_integrity_signal(markdown_text: str) -> dict[str, Any]:
+    replacement_count = (
+        markdown_text.count("�")
+        + markdown_text.count("□")
+        + markdown_text.count("▯")
+    )
+    denominator = max(_compact_character_count(markdown_text), 1)
+    replacement_ratio = replacement_count / denominator
+    remaining_cjk_compatibility_count = sum(
+        1
+        for character in markdown_text
+        if _is_cjk_compatibility_character(character)
+    )
+    formula_not_decoded_count = markdown_text.count(FORMULA_NOT_DECODED_PLACEHOLDER)
+    failed = (
+        replacement_count >= MIN_REPLACEMENT_FAILURE_COUNT
+        and replacement_ratio >= MIN_REPLACEMENT_FAILURE_RATIO
+    )
+    warned = (
+        replacement_count >= MIN_REPLACEMENT_WARNING_COUNT
+        or replacement_ratio >= MIN_REPLACEMENT_WARNING_RATIO
+        or remaining_cjk_compatibility_count > 0
+        or formula_not_decoded_count > 0
+    )
+    return {
+        "status": _signal_status(failed=failed, warned=warned),
+        "replacement_character_count": replacement_count,
+        "replacement_character_ratio": replacement_ratio,
+        "remaining_cjk_compatibility_count": remaining_cjk_compatibility_count,
+        "formula_not_decoded_count": formula_not_decoded_count,
+    }
+
+
+def _apply_text_integrity_findings(
+    reasons: list[str],
+    warnings: list[str],
+    text_integrity_signal: dict[str, Any],
+) -> None:
+    if text_integrity_signal["status"] == "fail":
+        reasons.append("excessive_replacement_characters")
+        return
+    if (
+        text_integrity_signal["replacement_character_count"] >= MIN_REPLACEMENT_WARNING_COUNT
+        or text_integrity_signal["replacement_character_ratio"] >= MIN_REPLACEMENT_WARNING_RATIO
+    ):
+        warnings.append("replacement_characters")
+    if text_integrity_signal["remaining_cjk_compatibility_count"] > 0:
+        warnings.append("cjk_compatibility_remaining")
+    if text_integrity_signal["formula_not_decoded_count"] > 0:
+        warnings.append("formula_not_decoded")
+
+
+def _apply_text_normalization_signal(
+    quality: dict[str, Any],
+    normalization_report: dict[str, Any],
+) -> dict[str, Any]:
+    quality = _ensure_quality_evidence_fields(quality)
+    quality["signals"]["text_normalization"] = {
+        "status": "pass",
+        **normalization_report,
+    }
+    return quality
+
+
 def _assess_agent_quality(
     markdown_text: str,
     pictures: list[ImageSidecar],
@@ -163,6 +241,7 @@ def _assess_agent_quality(
         compute_content_trust_signals = _compute_content_trust_signals
     content_trust = compute_content_trust_signals(text_without_placeholders)
     repetition_signal = _compute_repetition_signal(text_without_placeholders)
+    text_integrity_signal = _compute_text_integrity_signal(text_without_placeholders)
 
     reasons: list[str] = []
     if non_placeholder_characters < required_text:
@@ -180,6 +259,7 @@ def _assess_agent_quality(
     warnings: list[str] = []
     if not reasons and repetition_signal["status"] == "warn":
         warnings.append("repetitive_text")
+    _apply_text_integrity_findings(reasons, warnings, text_integrity_signal)
 
     status = "good" if not reasons else "failed_for_agent"
     signals = {
@@ -207,6 +287,7 @@ def _assess_agent_quality(
             "max_table_fragment_signal": MAX_TABLE_FRAGMENT_SIGNAL,
         },
         "repetition": repetition_signal,
+        "text_integrity": text_integrity_signal,
     }
 
     return _finalize_quality_report(
@@ -249,6 +330,7 @@ def _assess_text_native_quality(
         compute_content_trust_signals = _compute_content_trust_signals
     content_trust = compute_content_trust_signals(text_without_placeholders)
     repetition_signal = _compute_repetition_signal(text_without_placeholders)
+    text_integrity_signal = _compute_text_integrity_signal(text_without_placeholders)
     structure_signals = compute_text_native_structure_signals(
         text_without_placeholders,
         input_type=input_type,
@@ -271,6 +353,7 @@ def _assess_text_native_quality(
     warnings: list[str] = []
     if not reasons and repetition_signal["status"] == "warn":
         warnings.append("repetitive_text")
+    _apply_text_integrity_findings(reasons, warnings, text_integrity_signal)
 
     status = "good" if not reasons else "failed_for_agent"
     signals = {
@@ -296,6 +379,7 @@ def _assess_text_native_quality(
             "table_fragment_signal": content_trust["table_fragment_signal"],
         },
         "repetition": repetition_signal,
+        "text_integrity": text_integrity_signal,
     }
 
     return _finalize_quality_report(
@@ -337,6 +421,7 @@ def _assess_spreadsheet_quality(
     if compute_content_trust_signals is None:
         compute_content_trust_signals = _compute_content_trust_signals
     content_trust = compute_content_trust_signals(text_without_placeholders)
+    text_integrity_signal = _compute_text_integrity_signal(text_without_placeholders)
     table_signals = _compute_spreadsheet_table_signals(structured_document)
     has_table_structure = has_spreadsheet_table_content(structured_document)
 
@@ -357,6 +442,7 @@ def _assess_spreadsheet_quality(
         < table_signals["structured_text_characters"] * 0.25
     ):
         warnings.append("markdown_structured_mismatch")
+    _apply_text_integrity_findings(reasons, warnings, text_integrity_signal)
 
     status = "good" if not reasons else "failed_for_agent"
     signals = {
@@ -384,6 +470,7 @@ def _assess_spreadsheet_quality(
             "line_structure_signal": content_trust["line_structure_signal"],
             "table_fragment_signal": content_trust["table_fragment_signal"],
         },
+        "text_integrity": text_integrity_signal,
     }
 
     return _finalize_quality_report(
@@ -488,7 +575,11 @@ def _apply_page_quality_risk(
     failed_page_ratio = len(failed_pages) / page_count
     fatal_page_failure = bool(
         failed_pages
-        and (page_count == 1 or failed_pages[0] == 1 or failed_page_ratio >= 0.5)
+        and (
+            page_count <= 3
+            or failed_page_ratio >= 0.5
+            or (len(failed_pages) >= 10 and failed_page_ratio >= 0.2)
+        )
     )
     page_signal = {
         "status": _signal_status(failed=fatal_page_failure, warned=bool(failed_pages)),
@@ -505,7 +596,7 @@ def _apply_page_quality_risk(
         quality["reasons"] = _unique([*quality.get("reasons", []), "page_quality_failed"])
         _raise_quality_risk(quality, "high")
     elif failed_pages:
-        _add_quality_warning(quality, "page_quality_failed")
+        _add_quality_warning(quality, "partial_page_quality_failed")
 
     return quality
 

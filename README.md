@@ -18,8 +18,8 @@ Each successful conversion writes:
 | Artifact | Purpose |
 | --- | --- |
 | `source.manifest.json` | Quality risk, routing, remediation, and evidence metadata |
-| `source.md` | Default agent-readable Markdown |
-| `source.docling.json` | Authoritative structured Docling export from the same conversion result |
+| `source.md` | Default agent-readable Markdown, with narrow CJK cleanup applied for agent use |
+| `source.docling.json` | Authoritative structured Docling export from the same conversion result; kept as Docling's structured output |
 | `source.images.json` | Always-written image sidecar list; empty when extraction is unavailable or no images are found |
 | `source.meta.json` | Lightweight ingestion metadata for downstream workflows |
 
@@ -33,7 +33,14 @@ Downstream rule:
 
 The automatic quality model is a risk screen, not a semantic audit. A low-risk
 result means no hard failure was detected; it does not prove source fidelity or
-complete source-to-Markdown alignment.
+complete source-to-Markdown alignment. Medium-risk `good` output is still
+agent-usable by default, but its `warnings` and `signals` should be inspected.
+
+For Chinese-heavy documents, `source.md` receives targeted Markdown cleanup for
+CJK compatibility glyphs and abnormal spaces between Chinese characters. The
+manifest records this under `quality.signals.text_normalization`, while
+`source.docling.json` remains the structured Docling export for recovery and
+deeper inspection.
 
 `docling-skill` intentionally does not fetch remote URLs, chunk documents, or emit downstream knowledge fields such as tags, keywords, categories, or summaries.
 
