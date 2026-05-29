@@ -4,12 +4,14 @@
 Supported local inputs:
 - pdf
 - docx
+- pptx
 - xls
 - xlsx
 - csv
 - html
 - txt
 - md
+- png, jpg, jpeg, tif, tiff, bmp, webp
 
 Outputs:
 - source.md: Markdown with stable image placeholders like [[image:picture-p2-0]]
@@ -47,7 +49,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "input_path",
-        help="Local input artifact. Supported: pdf, docx, xls, xlsx, csv, html, txt, md.",
+        help=(
+            "Local input artifact. Supported: pdf, docx, pptx, xls, xlsx, csv, "
+            "html, txt, md, png, jpg, jpeg, tif, tiff, bmp, webp."
+        ),
     )
     parser.add_argument(
         "output_dir",

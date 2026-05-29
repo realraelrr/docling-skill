@@ -1,6 +1,6 @@
 ---
 name: docling-skill
-description: Use when converting local documents with docling-skill into agent-ready source.* sidecar outputs, especially PDF, DOCX, XLS, XLSX, CSV, HTML, TXT, or Markdown inputs that need manifest-gated Markdown, structured Docling JSON, image sidecars, OCR remediation, or local document pre-ingestion for downstream knowledge-base workflows.
+description: Use when converting local documents with docling-skill into agent-ready source.* sidecar outputs, especially PDF, DOCX, PPTX, XLS, XLSX, CSV, HTML, TXT, Markdown, or common image inputs that need manifest-gated Markdown, structured Docling JSON, image sidecars, OCR remediation, or local document pre-ingestion for downstream knowledge-base workflows.
 ---
 
 # docling-skill
@@ -40,8 +40,10 @@ Optional flags:
 
 Inputs:
 
-- `input_path`: Absolute or repo-relative local document path. Supported inputs: `pdf`, `docx`, `xls`, `xlsx`, `csv`, `html`, `txt`, and `md`.
+- `input_path`: Absolute or repo-relative local document path. Supported inputs: `pdf`, `docx`, `pptx`, `xls`, `xlsx`, `csv`, `html`, `txt`, `md`, `png`, `jpg`, `jpeg`, `tif`, `tiff`, `bmp`, and `webp`.
 - `output_dir`: Explicit directory where outputs should be written.
+
+Legacy `.doc` and `.ppt` files are intentionally rejected. Save them as `.docx`/`.pptx` or PDF before ingestion.
 
 ## Outputs
 The extractor writes:
@@ -119,6 +121,8 @@ When analysis depends on a specific figure or chart:
 
 Image handling notes:
 - Embedded images in local PDFs are supported.
+- Common local image files (`png`, `jpg`, `jpeg`, `tif`, `tiff`, `bmp`, `webp`) are supported through Docling's native image input.
+- Image-only outputs with no usable OCR text should be treated as high risk when `quality.status` is `failed_for_agent`.
 - Image extraction is not universal across all supported formats.
 - HTML and webpage image capture should be owned by the fetcher/browser layer, not this ingestion step.
 
@@ -164,7 +168,7 @@ conda run -n docling python -m docling_skill.cli \
 
 ## Scope
 
-OCR flags are mainly relevant for PDF inputs. Text-native formats such as DOCX, HTML, TXT, and Markdown, and spreadsheet formats such as XLS, XLSX, and CSV, typically do not need the PDF remediation path.
+OCR flags are mainly relevant for PDF inputs. Text-native formats such as DOCX, PPTX, HTML, TXT, and Markdown, spreadsheet formats such as XLS, XLSX, and CSV, and local image formats typically do not need the PDF remediation path.
 
 Docling itself supports more formats upstream, but those remain out of scope for this workflow phase unless they are explicitly added to the local `source.*` contract here.
 

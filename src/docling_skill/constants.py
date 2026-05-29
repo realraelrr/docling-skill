@@ -39,6 +39,7 @@ OCRMAC_LANGUAGE_ALIASES = {
 INPUT_TYPE_BY_SUFFIX = {
     ".pdf": "pdf",
     ".docx": "docx",
+    ".pptx": "pptx",
     ".xls": "xls",
     ".xlsx": "xlsx",
     ".xlsm": "xlsm",
@@ -47,6 +48,13 @@ INPUT_TYPE_BY_SUFFIX = {
     ".htm": "html",
     ".txt": "txt",
     ".md": "md",
+    ".png": "image",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".tif": "image",
+    ".tiff": "image",
+    ".bmp": "image",
+    ".webp": "image",
 }
 TEXT_NATIVE_INPUT_TYPES = {"docx", "html", "txt", "md"}
 TEXT_NATIVE_INPUT_FORMATS = {
@@ -54,6 +62,14 @@ TEXT_NATIVE_INPUT_FORMATS = {
     "html": InputFormat.HTML,
     "txt": InputFormat.MD,
     "md": InputFormat.MD,
+}
+PRESENTATION_INPUT_TYPES = {"pptx"}
+PRESENTATION_INPUT_FORMATS = {
+    "pptx": InputFormat.PPTX,
+}
+IMAGE_INPUT_TYPES = {"image"}
+IMAGE_INPUT_FORMATS = {
+    "image": InputFormat.IMAGE,
 }
 SPREADSHEET_INPUT_TYPES = {"xlsx", "csv", "xls"}
 SPREADSHEET_INPUT_FORMATS = {

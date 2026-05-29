@@ -46,6 +46,8 @@ def _assert_source_sidecar_contract(
     *,
     expected_input_type: str,
     expected_pipeline_family: str,
+    expected_quality_status: str = "good",
+    expected_agent_ready: bool = True,
 ):
     markdown_path = outputs["markdown_path"]
     images_path = outputs["images_path"]
@@ -71,13 +73,13 @@ def _assert_source_sidecar_contract(
     ]
     assert manifest["input_type"] == expected_input_type
     assert manifest["pipeline_family"] == expected_pipeline_family
-    assert manifest["quality"]["status"] == "good"
-    assert manifest["quality"]["agent_ready"] is True
+    assert manifest["quality"]["status"] == expected_quality_status
+    assert manifest["quality"]["agent_ready"] is expected_agent_ready
 
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     assert meta["input_type"] == expected_input_type
     assert meta["pipeline_family"] == expected_pipeline_family
-    assert meta["quality_status"] == "good"
+    assert meta["quality_status"] == expected_quality_status
 
     images = json.loads(images_path.read_text(encoding="utf-8"))
     assert images == []
@@ -117,9 +119,17 @@ def _docling_json_text_values(docling_document: object) -> set[str]:
         ("sample.html", "html"),
         ("sample.txt", "txt"),
         ("sample.md", "md"),
+        ("sample.pptx", "pptx"),
+        ("sample.png", "image"),
+        ("sample.jpg", "image"),
+        ("sample.jpeg", "image"),
+        ("sample.tif", "image"),
+        ("sample.tiff", "image"),
+        ("sample.bmp", "image"),
+        ("sample.webp", "image"),
     ],
 )
-def test_detect_input_type_normalizes_phase_one_formats(filename: str, expected_type: str):
+def test_detect_input_type_normalizes_supported_formats(filename: str, expected_type: str):
     assert core.detect_input_type(Path(filename)) == expected_type
 
 
@@ -269,21 +279,87 @@ def test_convert_document_routes_supported_spreadsheet_inputs_to_spreadsheet_pat
 
 
 @pytest.mark.parametrize(
+    ("suffix", "expected_type", "expected_pipeline_family"),
+    [
+        (".pptx", "pptx", "presentation"),
+        (".png", "image", "image"),
+        (".jpg", "image", "image"),
+        (".jpeg", "image", "image"),
+        (".tif", "image", "image"),
+        (".tiff", "image", "image"),
+        (".bmp", "image", "image"),
+        (".webp", "image", "image"),
+    ],
+)
+def test_convert_document_routes_pptx_and_image_inputs_to_docling_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
+    expected_type: str,
+    expected_pipeline_family: str,
+):
+    input_path = tmp_path / f"example{suffix}"
+    output_dir = tmp_path / f"out-{expected_type}-{suffix.lstrip('.')}"
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_presentation_converter(path: Path, *, input_type: str) -> tuple[core.AttemptArtifacts, list[dict[str, object]]]:
+        calls.append(("presentation", path.suffix, input_type))
+        attempt = _fake_attempt(
+            path,
+            input_type=input_type,
+            pipeline_family="presentation",
+        )
+        return attempt, [attempt.manifest]
+
+    def fake_image_converter(path: Path, *, input_type: str) -> tuple[core.AttemptArtifacts, list[dict[str, object]]]:
+        calls.append(("image", path.suffix, input_type))
+        attempt = _fake_attempt(
+            path,
+            input_type=input_type,
+            pipeline_family="image",
+        )
+        return attempt, [attempt.manifest]
+
+    monkeypatch.setattr(core, "_convert_presentation_input", fake_presentation_converter, raising=False)
+    monkeypatch.setattr(core, "_convert_image_input", fake_image_converter, raising=False)
+
+    outputs = core.convert_document_to_ingestion_outputs(
+        input_path=input_path,
+        output_dir=output_dir,
+    )
+
+    assert calls == [(expected_pipeline_family, suffix, expected_type)]
+    assert outputs["manifest"]["input_type"] == expected_type
+    assert outputs["manifest"]["pipeline_family"] == expected_pipeline_family
+    assert outputs["meta"]["input_type"] == expected_type
+    assert outputs["meta"]["pipeline_family"] == expected_pipeline_family
+
+
+@pytest.mark.parametrize(
     "filename",
     [
-        "slides.pptx",
         "paper.tex",
         "captions.vtt",
         "audio.wav",
         "audio.mp3",
-        "image.png",
-        "image.jpg",
-        "image.jpeg",
         "image.gif",
-        "image.webp",
     ],
 )
-def test_convert_document_rejects_deferred_input_types(tmp_path: Path, filename: str):
+def test_detect_input_type_keeps_unsupported_formats_unrouted(filename: str):
+    assert core.detect_input_type(Path(filename)) == "document"
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "paper.tex",
+        "captions.vtt",
+        "audio.wav",
+        "audio.mp3",
+        "image.gif",
+    ],
+)
+def test_convert_document_rejects_unsupported_input_types(tmp_path: Path, filename: str):
     input_path = tmp_path / filename
     expected_suffix_pattern = input_path.suffix.replace(".", r"\.")
     with pytest.raises(NotImplementedError, match=expected_suffix_pattern):
@@ -294,22 +370,22 @@ def test_convert_document_rejects_deferred_input_types(tmp_path: Path, filename:
 
 
 @pytest.mark.parametrize(
-    "filename",
+    ("filename", "guidance_pattern"),
     [
-        "slides.pptx",
-        "paper.tex",
-        "captions.vtt",
-        "audio.wav",
-        "audio.mp3",
-        "image.png",
-        "image.jpg",
-        "image.jpeg",
-        "image.gif",
-        "image.webp",
+        ("legacy.doc", r"Save as \.docx or PDF"),
+        ("legacy.ppt", r"Save as \.pptx or PDF"),
     ],
 )
-def test_detect_input_type_keeps_deferred_formats_unrouted(filename: str):
-    assert core.detect_input_type(Path(filename)) == "document"
+def test_convert_document_rejects_legacy_office_formats_with_guidance(
+    tmp_path: Path,
+    filename: str,
+    guidance_pattern: str,
+):
+    with pytest.raises(NotImplementedError, match=guidance_pattern):
+        core.convert_document_to_ingestion_outputs(
+            input_path=tmp_path / filename,
+            output_dir=tmp_path / f"out-{Path(filename).suffix.lstrip('.')}",
+        )
 
 
 def test_convert_document_rejects_xlsm_with_manual_preprocess_guidance(tmp_path: Path):
@@ -384,6 +460,93 @@ def test_convert_document_smoke_converts_real_docx_file(tmp_path: Path):
     assert "Example Title" in outputs["markdown_text"]
     assert "docx body should survive" in outputs["markdown_text"].lower()
     assert outputs["manifest"]["quality"]["reasons"] == []
+
+
+def test_convert_document_smoke_converts_real_pptx_file(tmp_path: Path):
+    pptx = pytest.importorskip("pptx")
+    presentation = pptx.Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+    slide.shapes.title.text = "Quarterly Plan"
+    slide.placeholders[1].text = "This pptx body should survive docling conversion."
+
+    input_path = tmp_path / "sample.pptx"
+    presentation.save(input_path)
+
+    outputs = core.convert_document_to_ingestion_outputs(
+        input_path=input_path,
+        output_dir=tmp_path / "out-pptx",
+    )
+
+    _assert_source_sidecar_contract(
+        outputs,
+        expected_input_type="pptx",
+        expected_pipeline_family="presentation",
+    )
+    assert "Quarterly Plan" in outputs["markdown_text"]
+    assert "pptx body should survive" in outputs["markdown_text"].lower()
+    assert outputs["manifest"]["quality"]["reasons"] == []
+
+
+def test_convert_document_uses_structured_pages_for_pptx_page_count(tmp_path: Path):
+    pptx = pytest.importorskip("pptx")
+    presentation = pptx.Presentation()
+    for slide_index in range(3):
+        slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+        slide.shapes.title.text = f"Plan Slide {slide_index + 1}"
+        slide.placeholders[1].text = (
+            f"This pptx body for slide {slide_index + 1} should survive conversion."
+        )
+
+    input_path = tmp_path / "multi-slide.pptx"
+    presentation.save(input_path)
+
+    outputs = core.convert_document_to_ingestion_outputs(
+        input_path=input_path,
+        output_dir=tmp_path / "out-pptx-pages",
+    )
+
+    docling_json = json.loads(outputs["docling_json_path"].read_text(encoding="utf-8"))
+    assert len(docling_json["pages"]) == 3
+    assert outputs["manifest"]["page_count"] == 3
+    assert outputs["manifest"]["attempts"][0]["page_count"] == 3
+
+
+@pytest.mark.parametrize(
+    ("suffix", "pil_format"),
+    [
+        ("png", "PNG"),
+        ("jpg", "JPEG"),
+        ("jpeg", "JPEG"),
+        ("tif", "TIFF"),
+        ("tiff", "TIFF"),
+        ("bmp", "BMP"),
+        ("webp", "WEBP"),
+    ],
+)
+def test_convert_document_smoke_converts_generated_images_as_high_risk_when_no_text(
+    tmp_path: Path,
+    suffix: str,
+    pil_format: str,
+):
+    pil_image = pytest.importorskip("PIL.Image")
+    input_path = tmp_path / f"sample.{suffix}"
+    image = pil_image.new("RGB", (80, 80), color="white")
+    image.save(input_path, format=pil_format)
+
+    outputs = core.convert_document_to_ingestion_outputs(
+        input_path=input_path,
+        output_dir=tmp_path / f"out-image-{suffix}",
+    )
+
+    _assert_source_sidecar_contract(
+        outputs,
+        expected_input_type="image",
+        expected_pipeline_family="image",
+        expected_quality_status="failed_for_agent",
+        expected_agent_ready=False,
+    )
+    assert outputs["manifest"]["quality"]["risk_level"] == "high"
+    assert "low_text_content" in outputs["manifest"]["quality"]["reasons"]
 
 
 def test_convert_document_smoke_converts_real_xlsx_file_with_merged_cells(tmp_path: Path):

@@ -30,6 +30,10 @@ from . import spreadsheet as _spreadsheet_helpers
 from .constants import (
     MIN_AGENT_PAGE_TEXT_CHARACTERS,
     PROJECT_ROOT,
+    IMAGE_INPUT_FORMATS,
+    IMAGE_INPUT_TYPES,
+    PRESENTATION_INPUT_FORMATS,
+    PRESENTATION_INPUT_TYPES,
     SOURCE_DOCLING_JSON_NAME,
     SOURCE_IMAGES_NAME,
     SOURCE_MANIFEST_NAME,
@@ -553,6 +557,105 @@ def _convert_text_native_input(
     return attempt, [attempt.manifest]
 
 
+def _convert_presentation_input(
+    input_path: Path,
+    *,
+    input_type: str,
+) -> tuple[AttemptArtifacts, list[dict[str, Any]]]:
+    converter = DocumentConverter(
+        allowed_formats=[PRESENTATION_INPUT_FORMATS[input_type]]
+    )
+    result = converter.convert(str(input_path))
+    if result.status not in {ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS}:
+        raise RuntimeError(f"Conversion failed with status: {result.status}")
+
+    pictures = _artifact_helpers._collect_picture_sidecars(result.document)
+    markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
+    markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
+    structured_document = _artifact_helpers._export_structured_document(result.document)
+    page_count = _presentation_page_count(structured_document, result)
+    quality = _quality_helpers._assess_text_native_quality(
+        markdown_text=markdown_text,
+        pictures=pictures,
+        input_type=input_type,
+    )
+    manifest = _manifest_helpers._build_attempt_manifest(
+        input_path,
+        input_type=input_type,
+        pipeline_family="presentation",
+        attempt_label="primary",
+        status=result.status.value,
+        images=pictures,
+        markdown_text=markdown_text,
+        ocr_metadata=None,
+        quality=quality,
+        page_outputs={},
+        page_count=page_count,
+    )
+    attempt = AttemptArtifacts(
+        markdown_text=markdown_text,
+        images=pictures,
+        page_outputs={},
+        structured_document=structured_document,
+        manifest=manifest,
+    )
+    return attempt, [attempt.manifest]
+
+
+def _presentation_page_count(
+    structured_document: dict[str, Any],
+    result: Any,
+) -> int:
+    pages = structured_document.get("pages")
+    if isinstance(pages, (dict, list, tuple, set)) and len(pages) > 0:
+        return len(pages)
+    return max(len(getattr(result, "pages", [])), 1)
+
+
+def _convert_image_input(
+    input_path: Path,
+    *,
+    input_type: str,
+) -> tuple[AttemptArtifacts, list[dict[str, Any]]]:
+    input_format = IMAGE_INPUT_FORMATS[input_type]
+    converter = DocumentConverter(allowed_formats=[input_format])
+    result = converter.convert(str(input_path))
+    if result.status not in {ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS}:
+        raise RuntimeError(f"Conversion failed with status: {result.status}")
+
+    pictures = _artifact_helpers._collect_picture_sidecars(result.document)
+    markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
+    markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
+    structured_document = _artifact_helpers._export_structured_document(result.document)
+    page_count = max(len(getattr(result, "pages", [])), 1)
+    quality = _quality_helpers._assess_agent_quality(
+        markdown_text=markdown_text,
+        pictures=pictures,
+        page_count=page_count,
+    )
+    manifest = _manifest_helpers._build_attempt_manifest(
+        input_path,
+        input_type=input_type,
+        pipeline_family="image",
+        attempt_label="primary",
+        status=result.status.value,
+        images=pictures,
+        markdown_text=markdown_text,
+        ocr_metadata=None,
+        quality=quality,
+        page_outputs={},
+        page_count=page_count,
+    )
+    attempt = AttemptArtifacts(
+        markdown_text=markdown_text,
+        images=pictures,
+        page_outputs={},
+        structured_document=structured_document,
+        manifest=manifest,
+    )
+    return attempt, [attempt.manifest]
+
+
 def _convert_spreadsheet_input(
     input_path: Path,
     *,
@@ -653,10 +756,30 @@ def _dispatch_conversion(
             input_path,
             input_type=input_type,
         )
+    if input_type in PRESENTATION_INPUT_TYPES:
+        return _convert_presentation_input(
+            input_path,
+            input_type=input_type,
+        )
+    if input_type in IMAGE_INPUT_TYPES:
+        return _convert_image_input(
+            input_path,
+            input_type=input_type,
+        )
     if input_type == "xlsm":
         raise NotImplementedError(
             "Unsupported macro-enabled spreadsheet for v1 ingestion contract: .xlsm. "
             "Save as .xlsx or .csv before ingestion."
+        )
+    if input_path.suffix.lower() == ".doc":
+        raise NotImplementedError(
+            "Unsupported legacy Word format for v1 ingestion contract: .doc. "
+            "Save as .docx or PDF before ingestion."
+        )
+    if input_path.suffix.lower() == ".ppt":
+        raise NotImplementedError(
+            "Unsupported legacy PowerPoint format for v1 ingestion contract: .ppt. "
+            "Save as .pptx or PDF before ingestion."
         )
     raise NotImplementedError(
         f"Unsupported input type for v1 ingestion contract: {input_path.suffix or '<no suffix>'}"

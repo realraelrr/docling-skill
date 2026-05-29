@@ -4,14 +4,17 @@
 
 [中文 README](README.zh-CN.md)
 
-Use it when an agent needs risk-aware local PDF, Office, HTML, text, or
+Use it when an agent needs risk-aware local PDF, Office, image, HTML, text, or
 Markdown conversion before downstream reasoning, retrieval, wiki ingestion, or
 handoff. The key output is not just Markdown; it is an inspectable manifest with
 minimum viability gates, risk level, warnings, and evidence signals.
 
 ## What It Does
 
-Supported local inputs: `pdf`, `docx`, `xls`, `xlsx`, `csv`, `html`, `txt`, and `md`.
+Supported local inputs: `pdf`, `docx`, `pptx`, `xls`, `xlsx`, `csv`, `html`, `txt`, `md`, `png`, `jpg`, `jpeg`, `tif`, `tiff`, `bmp`, and `webp`.
+
+Legacy `.doc` and `.ppt` files are intentionally not supported. Save them as
+`.docx`/`.pptx` or PDF before ingestion.
 
 Each successful conversion writes:
 
@@ -34,6 +37,10 @@ Downstream rule:
 The automatic quality model is a risk screen, not a semantic audit. A low-risk
 result means no hard failure was detected; it does not prove source fidelity or
 complete source-to-Markdown alignment.
+
+Image inputs use the same agent-readiness gate as OCR-oriented extraction. An
+image-only result with no usable OCR text is reported as high risk and
+`failed_for_agent` rather than treated as clean ingestion.
 
 `docling-skill` intentionally does not fetch remote URLs, chunk documents, or emit downstream knowledge fields such as tags, keywords, categories, or summaries.
 
