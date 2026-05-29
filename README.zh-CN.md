@@ -6,7 +6,9 @@
 
 ## 它做什么
 
-当前支持的本地输入：`pdf`、`docx`、`xls`、`xlsx`、`csv`、`html`、`txt`、`md`。
+当前支持的本地输入：`pdf`、`docx`、`pptx`、`xls`、`xlsx`、`csv`、`html`、`txt`、`md`、`png`、`jpg`、`jpeg`、`tif`、`tiff`、`bmp`、`webp`。
+
+旧版 `.doc` 和 `.ppt` 文件有意不支持。请先另存为 `.docx`/`.pptx` 或 PDF，再执行 ingestion。
 
 每次成功转换都会写出：
 
@@ -27,6 +29,8 @@
 5. 通过 `source.images.json` 解析 `[[image:picture-p2-1]]` 这类图片占位符。
 
 自动质量模型只是风险筛查，不是语义审校。低风险表示没有检测到硬失败，不代表已经证明源文档语义保真或完整对齐。
+
+图片输入使用与 OCR 类提取一致的 agent-ready 质量门。如果图片没有可用 OCR 文本，会被标记为高风险 `failed_for_agent`，不会被当作干净 ingestion。
 
 `docling-skill` 不负责远程 URL 抓取、文档 chunking，也不输出标签、关键词、分类、摘要等下游知识库字段。
 
