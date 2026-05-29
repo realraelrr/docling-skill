@@ -31,6 +31,7 @@ MIN_REPLACEMENT_WARNING_COUNT = 5
 MIN_REPLACEMENT_WARNING_RATIO = 0.001
 MIN_REPLACEMENT_FAILURE_COUNT = 50
 MIN_REPLACEMENT_FAILURE_RATIO = 0.01
+MAX_NONFATAL_FAILED_PAGE_RATIO = 0.4
 FORMULA_NOT_DECODED_PLACEHOLDER = "<!-- formula-not-decoded -->"
 
 
@@ -580,7 +581,7 @@ def _apply_page_quality_risk(
         failed_pages
         and (
             page_count <= 3
-            or failed_page_ratio >= 0.5
+            or failed_page_ratio >= MAX_NONFATAL_FAILED_PAGE_RATIO
             or (len(failed_pages) >= 10 and failed_page_ratio >= 0.2)
         )
     )
@@ -589,6 +590,7 @@ def _apply_page_quality_risk(
         "page_count": page_count,
         "failed_page_count": len(failed_pages),
         "failed_page_ratio": failed_page_ratio,
+        "max_nonfatal_failed_page_ratio": MAX_NONFATAL_FAILED_PAGE_RATIO,
         "failed_pages": failed_pages,
         "first_page_failed": 1 in failed_pages,
     }
