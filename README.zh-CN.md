@@ -145,6 +145,7 @@ conda run -n docling python "$HOME/.codex/skills/.system/skill-creator/scripts/q
 conda run -n docling python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" .codex/skills/docling-skill
 conda run -n docling python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" .claude/skills/docling-skill
 
+conda run -n docling python -m ruff check .
 conda run -n docling python -m pytest
 ```
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import unicodedata
 
-
 CJK_SPACE_PATTERN = re.compile(r"(?<=[\u3400-\u9fff])[\t ]+(?=[\u3400-\u9fff])")
 
 

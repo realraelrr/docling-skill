@@ -28,10 +28,8 @@ def _normalize_ocr_languages(ocr_languages: list[str]) -> list[str]:
 def _normalize_engine_languages(
     ocr_engine: str,
     ocr_languages: list[str],
-    *,
-    normalize_ocr_languages=_normalize_ocr_languages,
 ) -> list[str]:
-    normalized_languages = normalize_ocr_languages(ocr_languages)
+    normalized_languages = _normalize_ocr_languages(ocr_languages)
     if ocr_engine != "ocrmac":
         return normalized_languages
     return [OCRMAC_LANGUAGE_ALIASES.get(language, language) for language in normalized_languages]
@@ -41,10 +39,8 @@ def _build_ocr_options(
     ocr_engine: str,
     ocr_languages: list[str],
     force_full_page_ocr: bool,
-    *,
-    normalize_engine_languages=_normalize_engine_languages,
 ):
-    normalized_languages = normalize_engine_languages(ocr_engine, ocr_languages)
+    normalized_languages = _normalize_engine_languages(ocr_engine, ocr_languages)
     engine = ocr_engine
 
     if engine == "auto" and normalized_languages:
@@ -96,13 +92,10 @@ def _build_remediation_plan(
     primary_quality: dict[str, Any],
     *,
     force_full_page_ocr: bool = False,
-    build_ocr_remediation_config=None,
 ) -> dict[str, Any] | None:
     if primary_quality.get("agent_ready"):
         return None
-    if build_ocr_remediation_config is None:
-        build_ocr_remediation_config = _build_ocr_remediation_config
-    return build_ocr_remediation_config(
+    return _build_ocr_remediation_config(
         ocr_engine=ocr_engine,
         ocr_languages=ocr_languages,
         force_full_page_ocr=force_full_page_ocr,
@@ -114,13 +107,12 @@ def _build_ocr_remediation_config(
     ocr_languages: list[str],
     *,
     force_full_page_ocr: bool = False,
-    normalize_engine_languages=_normalize_engine_languages,
 ) -> dict[str, Any] | None:
     if force_full_page_ocr:
         return None
 
     remediation_engine = "tesseract" if ocr_engine in {"auto", "ocrmac"} else ocr_engine
-    remediation_languages = normalize_engine_languages(remediation_engine, ocr_languages)
+    remediation_languages = _normalize_engine_languages(remediation_engine, ocr_languages)
     if not remediation_languages and remediation_engine == "tesseract":
         remediation_languages = ["eng"]
 

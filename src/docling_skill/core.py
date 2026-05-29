@@ -9,13 +9,13 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from docling.document_converter import (
-    DocumentConverter,
-    PdfFormatOption,
-)
 from docling.datamodel.base_models import ConversionStatus, InputFormat
 from docling.datamodel.pipeline_options import (
     PdfPipelineOptions,
+)
+from docling.document_converter import (
+    DocumentConverter,
+    PdfFormatOption,
 )
 from docling_core.types.doc import ImageRefMode
 from docling_core.types.doc.document import DoclingDocument
@@ -29,10 +29,9 @@ from . import quality as _quality_helpers
 from . import spreadsheet as _spreadsheet_helpers
 from . import text_normalization as _text_normalization_helpers
 from .constants import (
-    MIN_AGENT_PAGE_TEXT_CHARACTERS,
-    PROJECT_ROOT,
     IMAGE_INPUT_FORMATS,
     IMAGE_INPUT_TYPES,
+    MIN_AGENT_PAGE_TEXT_CHARACTERS,
     PRESENTATION_INPUT_FORMATS,
     PRESENTATION_INPUT_TYPES,
     SOURCE_DOCLING_JSON_NAME,
@@ -45,8 +44,20 @@ from .constants import (
     TEXT_NATIVE_INPUT_FORMATS,
     TEXT_NATIVE_INPUT_TYPES,
 )
-from .models import AttemptArtifacts, ImageSidecar, PageArtifacts, QualityReport
+from .constants import (
+    PROJECT_ROOT as _PROJECT_ROOT,
+)
+from .models import (
+    AttemptArtifacts,
+    AttemptManifest,
+    ImageSidecar,
+    PageArtifacts,
+    QualityReport,
+    SourceMeta,
+)
 from .routing import detect_input_type as _detect_input_type
+
+PROJECT_ROOT = _PROJECT_ROOT
 
 __all__ = [
     "convert_document_to_ingestion_outputs",
@@ -103,11 +114,11 @@ def infer_source_title(markdown_text: str, input_path: Path) -> str:
 def build_source_meta(
     *,
     input_path: Path | str,
-    manifest: dict[str, Any],
+    manifest: AttemptManifest,
     markdown_text: str,
     job_id: str | None = None,
     source_title: str | None = None,
-) -> dict[str, Any]:
+) -> SourceMeta:
     return _manifest_helpers.build_source_meta(
         input_path=input_path,
         manifest=manifest,
@@ -355,7 +366,7 @@ def _pick_better_attempt(
     return primary_attempt
 
 
-def _manifest_page_quality(manifest: dict[str, Any]) -> dict[int, QualityReport]:
+def _manifest_page_quality(manifest: AttemptManifest) -> dict[int, QualityReport]:
     return {
         int(page_no): quality
         for page_no, quality in manifest["page_quality"].items()
@@ -519,7 +530,7 @@ def _convert_pdf_input(
     ocr_languages: list[str],
     force_full_page_ocr: bool,
     ocr_remediation: bool,
-) -> tuple[AttemptArtifacts, list[dict[str, Any]]]:
+) -> tuple[AttemptArtifacts, list[AttemptManifest]]:
     primary_attempt = _convert_single_attempt(
         input_path,
         ocr_engine=ocr_engine,
@@ -555,7 +566,7 @@ def _convert_text_native_input(
     input_path: Path,
     *,
     input_type: str,
-) -> tuple[AttemptArtifacts, list[dict[str, Any]]]:
+) -> tuple[AttemptArtifacts, list[AttemptManifest]]:
     converter = DocumentConverter(
         allowed_formats=[TEXT_NATIVE_INPUT_FORMATS[input_type]]
     )
@@ -570,15 +581,41 @@ def _convert_text_native_input(
     if result.status not in {ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS}:
         raise RuntimeError(f"Conversion failed with status: {result.status}")
 
+    attempt = _build_non_pdf_attempt_from_result(
+        input_path,
+        result=result,
+        input_type=input_type,
+        pipeline_family="simple",
+    )
+    return attempt, [attempt.manifest]
+
+
+def _build_non_pdf_attempt_from_result(
+    input_path: Path,
+    *,
+    result: Any,
+    input_type: str,
+    pipeline_family: str,
+    page_count: int | None = None,
+) -> AttemptArtifacts:
     pictures = _artifact_helpers._collect_picture_sidecars(result.document)
     markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
     markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
     markdown_text, normalization_report = _normalize_agent_markdown(markdown_text)
     structured_document = _artifact_helpers._export_structured_document(result.document)
-    quality = _quality_helpers._assess_text_native_quality(
+    effective_page_count = _non_pdf_page_count(
+        structured_document,
+        result=result,
+        pipeline_family=pipeline_family,
+        page_count=page_count,
+    )
+    quality = _assess_non_pdf_quality(
         markdown_text=markdown_text,
         pictures=pictures,
+        structured_document=structured_document,
         input_type=input_type,
+        pipeline_family=pipeline_family,
+        page_count=effective_page_count,
     )
     quality = _quality_helpers._apply_text_normalization_signal(
         quality,
@@ -587,7 +624,7 @@ def _convert_text_native_input(
     manifest = _manifest_helpers._build_attempt_manifest(
         input_path,
         input_type=input_type,
-        pipeline_family="simple",
+        pipeline_family=pipeline_family,
         attempt_label="primary",
         status=result.status.value,
         images=pictures,
@@ -595,23 +632,64 @@ def _convert_text_native_input(
         ocr_metadata=None,
         quality=quality,
         page_outputs={},
-        page_count=max(len(getattr(result, "pages", [])), 1),
+        page_count=effective_page_count,
     )
-    attempt = AttemptArtifacts(
+    return AttemptArtifacts(
         markdown_text=markdown_text,
         images=pictures,
         page_outputs={},
         structured_document=structured_document,
         manifest=manifest,
     )
-    return attempt, [attempt.manifest]
+
+
+def _non_pdf_page_count(
+    structured_document: dict[str, Any],
+    *,
+    result: Any,
+    pipeline_family: str,
+    page_count: int | None,
+) -> int:
+    if page_count is not None:
+        return page_count
+    if pipeline_family == "presentation":
+        return _presentation_page_count(structured_document, result)
+    return max(len(getattr(result, "pages", [])), 1)
+
+
+def _assess_non_pdf_quality(
+    *,
+    markdown_text: str,
+    pictures: list[ImageSidecar],
+    structured_document: dict[str, Any],
+    input_type: str,
+    pipeline_family: str,
+    page_count: int,
+) -> QualityReport:
+    if pipeline_family == "spreadsheet":
+        return _quality_helpers._assess_spreadsheet_quality(
+            markdown_text=markdown_text,
+            pictures=pictures,
+            structured_document=structured_document,
+        )
+    if pipeline_family == "image":
+        return _quality_helpers._assess_agent_quality(
+            markdown_text=markdown_text,
+            pictures=pictures,
+            page_count=page_count,
+        )
+    return _quality_helpers._assess_text_native_quality(
+        markdown_text=markdown_text,
+        pictures=pictures,
+        input_type=input_type,
+    )
 
 
 def _convert_presentation_input(
     input_path: Path,
     *,
     input_type: str,
-) -> tuple[AttemptArtifacts, list[dict[str, Any]]]:
+) -> tuple[AttemptArtifacts, list[AttemptManifest]]:
     converter = DocumentConverter(
         allowed_formats=[PRESENTATION_INPUT_FORMATS[input_type]]
     )
@@ -619,40 +697,11 @@ def _convert_presentation_input(
     if result.status not in {ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS}:
         raise RuntimeError(f"Conversion failed with status: {result.status}")
 
-    pictures = _artifact_helpers._collect_picture_sidecars(result.document)
-    markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
-    markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
-    markdown_text, normalization_report = _normalize_agent_markdown(markdown_text)
-    structured_document = _artifact_helpers._export_structured_document(result.document)
-    page_count = _presentation_page_count(structured_document, result)
-    quality = _quality_helpers._assess_text_native_quality(
-        markdown_text=markdown_text,
-        pictures=pictures,
-        input_type=input_type,
-    )
-    quality = _quality_helpers._apply_text_normalization_signal(
-        quality,
-        normalization_report,
-    )
-    manifest = _manifest_helpers._build_attempt_manifest(
+    attempt = _build_non_pdf_attempt_from_result(
         input_path,
+        result=result,
         input_type=input_type,
         pipeline_family="presentation",
-        attempt_label="primary",
-        status=result.status.value,
-        images=pictures,
-        markdown_text=markdown_text,
-        ocr_metadata=None,
-        quality=quality,
-        page_outputs={},
-        page_count=page_count,
-    )
-    attempt = AttemptArtifacts(
-        markdown_text=markdown_text,
-        images=pictures,
-        page_outputs={},
-        structured_document=structured_document,
-        manifest=manifest,
     )
     return attempt, [attempt.manifest]
 
@@ -671,47 +720,18 @@ def _convert_image_input(
     input_path: Path,
     *,
     input_type: str,
-) -> tuple[AttemptArtifacts, list[dict[str, Any]]]:
+) -> tuple[AttemptArtifacts, list[AttemptManifest]]:
     input_format = IMAGE_INPUT_FORMATS[input_type]
     converter = DocumentConverter(allowed_formats=[input_format])
     result = converter.convert(str(input_path))
     if result.status not in {ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS}:
         raise RuntimeError(f"Conversion failed with status: {result.status}")
 
-    pictures = _artifact_helpers._collect_picture_sidecars(result.document)
-    markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
-    markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
-    markdown_text, normalization_report = _normalize_agent_markdown(markdown_text)
-    structured_document = _artifact_helpers._export_structured_document(result.document)
-    page_count = max(len(getattr(result, "pages", [])), 1)
-    quality = _quality_helpers._assess_agent_quality(
-        markdown_text=markdown_text,
-        pictures=pictures,
-        page_count=page_count,
-    )
-    quality = _quality_helpers._apply_text_normalization_signal(
-        quality,
-        normalization_report,
-    )
-    manifest = _manifest_helpers._build_attempt_manifest(
+    attempt = _build_non_pdf_attempt_from_result(
         input_path,
+        result=result,
         input_type=input_type,
         pipeline_family="image",
-        attempt_label="primary",
-        status=result.status.value,
-        images=pictures,
-        markdown_text=markdown_text,
-        ocr_metadata=None,
-        quality=quality,
-        page_outputs={},
-        page_count=page_count,
-    )
-    attempt = AttemptArtifacts(
-        markdown_text=markdown_text,
-        images=pictures,
-        page_outputs={},
-        structured_document=structured_document,
-        manifest=manifest,
     )
     return attempt, [attempt.manifest]
 
@@ -720,7 +740,7 @@ def _convert_spreadsheet_input(
     input_path: Path,
     *,
     input_type: str,
-) -> tuple[AttemptArtifacts, list[dict[str, Any]]]:
+) -> tuple[AttemptArtifacts, list[AttemptManifest]]:
     normalized_from = None
     conversion_input_type = input_type
     conversion_path = input_path
@@ -747,50 +767,23 @@ def _convert_spreadsheet_input(
         if result.status not in {ConversionStatus.SUCCESS, ConversionStatus.PARTIAL_SUCCESS}:
             raise RuntimeError(f"Conversion failed with status: {result.status}")
 
-        pictures = _artifact_helpers._collect_picture_sidecars(result.document)
-        markdown_text = result.document.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
-        markdown_text = _artifact_helpers._inject_picture_placeholders(markdown_text, pictures)
-        markdown_text, normalization_report = _normalize_agent_markdown(markdown_text)
-        structured_document = _artifact_helpers._export_structured_document(result.document)
+        attempt = _build_non_pdf_attempt_from_result(
+            input_path,
+            result=result,
+            input_type=input_type,
+            pipeline_family="spreadsheet",
+        )
     finally:
         if temp_dir is not None:
             temp_dir.cleanup()
 
     spreadsheet_metadata = _spreadsheet_helpers._extract_spreadsheet_metadata(
-        structured_document,
+        attempt.structured_document,
         source_format=input_type,
         normalized_from=normalized_from,
     )
-    quality = _quality_helpers._assess_spreadsheet_quality(
-        markdown_text=markdown_text,
-        pictures=pictures,
-        structured_document=structured_document,
-    )
-    quality = _quality_helpers._apply_text_normalization_signal(
-        quality,
-        normalization_report,
-    )
-    manifest = _manifest_helpers._build_attempt_manifest(
-        input_path,
-        input_type=input_type,
-        pipeline_family="spreadsheet",
-        attempt_label="primary",
-        status=result.status.value,
-        images=pictures,
-        markdown_text=markdown_text,
-        ocr_metadata=None,
-        quality=quality,
-        page_outputs={},
-        page_count=spreadsheet_metadata["sheet_count"],
-    )
-    manifest["spreadsheet"] = spreadsheet_metadata
-    attempt = AttemptArtifacts(
-        markdown_text=markdown_text,
-        images=pictures,
-        page_outputs={},
-        structured_document=structured_document,
-        manifest=manifest,
-    )
+    attempt.manifest["page_count"] = spreadsheet_metadata["sheet_count"]
+    attempt.manifest["spreadsheet"] = spreadsheet_metadata
     return attempt, [attempt.manifest]
 
 
@@ -802,7 +795,7 @@ def _dispatch_conversion(
     ocr_languages: list[str],
     force_full_page_ocr: bool,
     ocr_remediation: bool,
-) -> tuple[AttemptArtifacts, list[dict[str, Any]]]:
+) -> tuple[AttemptArtifacts, list[AttemptManifest]]:
     if input_type == "pdf":
         return _convert_pdf_input(
             input_path,
@@ -866,8 +859,8 @@ def _write_sidecars_with_staging(
     markdown_text: str,
     structured_document: dict[str, Any],
     images: list[ImageSidecar],
-    manifest: dict[str, Any],
-    meta: dict[str, Any],
+    manifest: AttemptManifest,
+    meta: SourceMeta,
 ) -> None:
     _preflight_sidecar_publish_targets(output_dir)
 

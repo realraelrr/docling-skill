@@ -27,12 +27,7 @@ def _encode_image_base64(picture_item: PictureItem, document: Any) -> tuple[str,
     return "image/png", base64.b64encode(image_buffer.getvalue()).decode("utf-8")
 
 
-def _collect_picture_sidecars(
-    document: Any,
-    *,
-    encode_image_base64=_encode_image_base64,
-    picture_id_factory=_picture_id,
-) -> list[ImageSidecar]:
+def _collect_picture_sidecars(document: Any) -> list[ImageSidecar]:
     pictures: list[ImageSidecar] = []
     picture_indices_by_page: dict[int, int] = {}
 
@@ -40,7 +35,7 @@ def _collect_picture_sidecars(
         if not isinstance(item, PictureItem):
             continue
 
-        encoded = encode_image_base64(item, document)
+        encoded = _encode_image_base64(item, document)
         if encoded is None:
             continue
 
@@ -50,7 +45,7 @@ def _collect_picture_sidecars(
         page_index = picture_indices_by_page.get(page_no or 0, 0)
         picture_indices_by_page[page_no or 0] = page_index + 1
 
-        picture_id = picture_id_factory(page_no, page_index)
+        picture_id = _picture_id(page_no, page_index)
         placeholder = f"[[image:{picture_id}]]"
 
         pictures.append(

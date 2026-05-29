@@ -1,15 +1,16 @@
 import importlib.metadata as package_metadata
 import json
-import tomllib
 from pathlib import Path
 
 import pytest
+import tomllib
+from docling_core.types.doc import BoundingBox, CoordOrigin, Size
+from docling_core.types.doc.document import DocItemLabel, DoclingDocument, ProvenanceItem
+
 import docling_skill
 import docling_skill.cli as cli
 import docling_skill.core as core
 from docling_skill import manifest as manifest_helpers
-from docling_core.types.doc import BoundingBox, CoordOrigin, Size
-from docling_core.types.doc.document import DocItemLabel, DoclingDocument, ProvenanceItem
 
 
 def _fake_attempt(input_path: Path) -> core.AttemptArtifacts:

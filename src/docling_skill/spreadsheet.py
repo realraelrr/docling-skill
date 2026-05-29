@@ -6,8 +6,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from docling.document_converter import CsvFormatOption, ExcelFormatOption
 from docling.datamodel.base_models import InputFormat
+from docling.document_converter import CsvFormatOption, ExcelFormatOption
 
 
 def _extract_spreadsheet_metadata(
@@ -84,13 +84,7 @@ def _xls_cell_value(book: Any, cell: Any) -> Any:
     return cell.value
 
 
-def _normalize_xls_to_xlsx(
-    input_path: Path,
-    output_path: Path,
-    *,
-    safe_excel_sheet_title=_safe_excel_sheet_title,
-    xls_cell_value=_xls_cell_value,
-) -> Path:
+def _normalize_xls_to_xlsx(input_path: Path, output_path: Path) -> Path:
     try:
         import openpyxl
         import xlrd
@@ -111,11 +105,11 @@ def _normalize_xls_to_xlsx(
 
     for sheet_index, sheet in enumerate(workbook.sheets(), start=1):
         worksheet = normalized_workbook.create_sheet(
-            title=safe_excel_sheet_title(sheet.name, f"Sheet{sheet_index}")
+            title=_safe_excel_sheet_title(sheet.name, f"Sheet{sheet_index}")
         )
         for row_index in range(sheet.nrows):
             for column_index in range(sheet.ncols):
-                value = xls_cell_value(workbook, sheet.cell(row_index, column_index))
+                value = _xls_cell_value(workbook, sheet.cell(row_index, column_index))
                 if value in {None, ""}:
                     continue
                 worksheet.cell(

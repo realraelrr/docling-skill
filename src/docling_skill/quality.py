@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import re
+from collections import Counter
 from typing import Any
 
 from .constants import (
@@ -16,7 +16,6 @@ from .constants import (
     TOKEN_PATTERN,
 )
 from .models import ImageSidecar
-
 
 QUALITY_GATE = "minimum_viability"
 QUALITY_LIMITATIONS = [
@@ -223,25 +222,17 @@ def _assess_agent_quality(
     pictures: list[ImageSidecar],
     page_count: int,
     min_required_text: int | None = None,
-    *,
-    strip_image_tokens=None,
-    compact_character_count=_compact_character_count,
-    compute_content_trust_signals=None,
 ) -> dict[str, Any]:
-    if strip_image_tokens is None:
-        strip_image_tokens = _strip_image_tokens
     placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
-    text_without_images = strip_image_tokens(markdown_text)
+    text_without_images = _strip_image_tokens(markdown_text)
     text_for_quality = _strip_formula_placeholders(text_without_images)
-    non_placeholder_characters = compact_character_count(text_for_quality)
+    non_placeholder_characters = _compact_character_count(text_for_quality)
     required_text = (
         min_required_text
         if min_required_text is not None
         else max(MIN_AGENT_TEXT_CHARACTERS, page_count * 20)
     )
-    if compute_content_trust_signals is None:
-        compute_content_trust_signals = _compute_content_trust_signals
-    content_trust = compute_content_trust_signals(text_for_quality)
+    content_trust = _compute_content_trust_signals(text_for_quality)
     repetition_signal = _compute_repetition_signal(text_for_quality)
     text_integrity_signal = _compute_text_integrity_signal(text_without_images)
 
@@ -309,36 +300,19 @@ def _assess_text_native_quality(
     markdown_text: str,
     pictures: list[ImageSidecar],
     input_type: str,
-    *,
-    strip_image_tokens=None,
-    compact_character_count=_compact_character_count,
-    compute_text_native_structure_signals=None,
-    min_text_native_characters=None,
-    has_text_native_body_survival=None,
-    compute_content_trust_signals=None,
 ) -> dict[str, Any]:
-    if strip_image_tokens is None:
-        strip_image_tokens = _strip_image_tokens
-    if has_text_native_body_survival is None:
-        has_text_native_body_survival = _has_text_native_body_survival
     placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
-    text_without_images = strip_image_tokens(markdown_text)
+    text_without_images = _strip_image_tokens(markdown_text)
     text_for_quality = _strip_formula_placeholders(text_without_images)
-    non_placeholder_characters = compact_character_count(text_for_quality)
-    if compute_text_native_structure_signals is None:
-        compute_text_native_structure_signals = _compute_text_native_structure_signals
-    if min_text_native_characters is None:
-        min_text_native_characters = _min_text_native_characters
-    if compute_content_trust_signals is None:
-        compute_content_trust_signals = _compute_content_trust_signals
-    content_trust = compute_content_trust_signals(text_for_quality)
+    non_placeholder_characters = _compact_character_count(text_for_quality)
+    content_trust = _compute_content_trust_signals(text_for_quality)
     repetition_signal = _compute_repetition_signal(text_for_quality)
     text_integrity_signal = _compute_text_integrity_signal(text_without_images)
-    structure_signals = compute_text_native_structure_signals(
+    structure_signals = _compute_text_native_structure_signals(
         text_for_quality,
         input_type=input_type,
     )
-    required_text = min_text_native_characters(
+    required_text = _min_text_native_characters(
         input_type,
         structure_signals=structure_signals,
     )
@@ -350,7 +324,7 @@ def _assess_text_native_quality(
         reasons.append("image_only_output")
     if (
         non_placeholder_characters >= required_text
-        and not has_text_native_body_survival(input_type, structure_signals)
+        and not _has_text_native_body_survival(input_type, structure_signals)
     ):
         reasons.append("missing_body_structure")
     warnings: list[str] = []
@@ -402,32 +376,17 @@ def _assess_spreadsheet_quality(
     markdown_text: str,
     pictures: list[ImageSidecar],
     structured_document: dict[str, Any],
-    *,
-    strip_image_tokens=None,
-    compact_spreadsheet_markdown_character_count=None,
-    has_spreadsheet_table_content=None,
-    compute_content_trust_signals=None,
 ) -> dict[str, Any]:
-    if strip_image_tokens is None:
-        strip_image_tokens = _strip_image_tokens
-    if compact_spreadsheet_markdown_character_count is None:
-        compact_spreadsheet_markdown_character_count = (
-            _compact_spreadsheet_markdown_character_count
-        )
     placeholder_count = len(IMAGE_TOKEN_PATTERN.findall(markdown_text))
-    text_without_images = strip_image_tokens(markdown_text)
+    text_without_images = _strip_image_tokens(markdown_text)
     text_for_quality = _strip_formula_placeholders(text_without_images)
-    non_placeholder_characters = compact_spreadsheet_markdown_character_count(
+    non_placeholder_characters = _compact_spreadsheet_markdown_character_count(
         text_for_quality
     )
-    if has_spreadsheet_table_content is None:
-        has_spreadsheet_table_content = _has_spreadsheet_table_content
-    if compute_content_trust_signals is None:
-        compute_content_trust_signals = _compute_content_trust_signals
-    content_trust = compute_content_trust_signals(text_for_quality)
+    content_trust = _compute_content_trust_signals(text_for_quality)
     text_integrity_signal = _compute_text_integrity_signal(text_without_images)
     table_signals = _compute_spreadsheet_table_signals(structured_document)
-    has_table_structure = has_spreadsheet_table_content(structured_document)
+    has_table_structure = _has_spreadsheet_table_content(structured_document)
 
     reasons: list[str] = []
     if non_placeholder_characters == 0:
@@ -495,11 +454,7 @@ def _compact_spreadsheet_markdown_character_count(markdown_text: str) -> int:
     return len(semantic_text)
 
 
-def _has_spreadsheet_table_content(
-    structured_document: dict[str, Any],
-    *,
-    compact_character_count=_compact_character_count,
-) -> bool:
+def _has_spreadsheet_table_content(structured_document: dict[str, Any]) -> bool:
     tables = structured_document.get("tables", [])
     for table in tables:
         if not isinstance(table, dict):
@@ -508,7 +463,10 @@ def _has_spreadsheet_table_content(
         if not isinstance(data, dict):
             continue
         for cell in data.get("table_cells", []):
-            if isinstance(cell, dict) and compact_character_count(str(cell.get("text", ""))) > 0:
+            if (
+                isinstance(cell, dict)
+                and _compact_character_count(str(cell.get("text", ""))) > 0
+            ):
                 return True
     return False
 
@@ -529,11 +487,7 @@ def _iter_spreadsheet_cells(structured_document: dict[str, Any]) -> list[dict[st
     return cells
 
 
-def _compute_spreadsheet_table_signals(
-    structured_document: dict[str, Any],
-    *,
-    compact_character_count=_compact_character_count,
-) -> dict[str, int]:
+def _compute_spreadsheet_table_signals(structured_document: dict[str, Any]) -> dict[str, int]:
     tables = [
         table for table in structured_document.get("tables", [])
         if isinstance(table, dict)
@@ -542,14 +496,14 @@ def _compute_spreadsheet_table_signals(
     non_empty_cells = [
         cell
         for cell in cells
-        if compact_character_count(str(cell.get("text", ""))) > 0
+        if _compact_character_count(str(cell.get("text", ""))) > 0
     ]
     return {
         "table_count": len(tables),
         "cell_count": len(cells),
         "non_empty_cell_count": len(non_empty_cells),
         "structured_text_characters": sum(
-            compact_character_count(str(cell.get("text", "")))
+            _compact_character_count(str(cell.get("text", "")))
             for cell in non_empty_cells
         ),
     }
@@ -621,17 +575,15 @@ def _min_text_native_characters(
     input_type: str,
     *,
     structure_signals: dict[str, int | bool] | None = None,
-    min_concise_structured_body_characters=None,
 ) -> int:
-    if min_concise_structured_body_characters is None:
-        min_concise_structured_body_characters = _min_concise_structured_body_characters
     if input_type == "txt":
         return 3
     if (
         structure_signals
         and structure_signals["has_heading"]
         and (
-            structure_signals["body_characters"] >= min_concise_structured_body_characters(input_type)
+            structure_signals["body_characters"]
+            >= _min_concise_structured_body_characters(input_type)
             or structure_signals["list_lexical_token_count"] >= 1
         )
     ):
@@ -668,20 +620,7 @@ def _compute_text_native_structure_signals(
     markdown_text: str,
     *,
     input_type: str,
-    compact_character_count=_compact_character_count,
-    count_lexical_tokens=None,
-    strip_list_marker=None,
-    min_text_native_body_characters=None,
-    min_concise_structured_body_characters=None,
 ) -> dict[str, int | bool]:
-    if count_lexical_tokens is None:
-        count_lexical_tokens = _count_lexical_tokens
-    if strip_list_marker is None:
-        strip_list_marker = _strip_list_marker
-    if min_text_native_body_characters is None:
-        min_text_native_body_characters = _min_text_native_body_characters
-    if min_concise_structured_body_characters is None:
-        min_concise_structured_body_characters = _min_concise_structured_body_characters
     raw_lines = [line.rstrip() for line in markdown_text.splitlines()]
     content_lines = [line.strip() for line in raw_lines if line.strip()]
     heading_lines = [line for line in content_lines if re.match(r"^#{1,6}\s+\S", line)]
@@ -689,10 +628,10 @@ def _compute_text_native_structure_signals(
     body_lines = [
         line for line in content_lines if line not in heading_lines and line not in list_lines
     ]
-    body_characters = sum(compact_character_count(line) for line in body_lines)
-    body_lexical_token_count = count_lexical_tokens(body_lines)
-    list_lexical_token_count = count_lexical_tokens(
-        [strip_list_marker(line) for line in list_lines]
+    body_characters = sum(_compact_character_count(line) for line in body_lines)
+    body_lexical_token_count = _count_lexical_tokens(body_lines)
+    list_lexical_token_count = _count_lexical_tokens(
+        [_strip_list_marker(line) for line in list_lines]
     )
 
     return {
@@ -706,10 +645,10 @@ def _compute_text_native_structure_signals(
         "body_lexical_token_count": body_lexical_token_count,
         "paragraph_survival": bool(body_lines)
         and (
-            body_characters >= min_text_native_body_characters(input_type)
+            body_characters >= _min_text_native_body_characters(input_type)
             or (
                 bool(heading_lines)
-                and body_characters >= min_concise_structured_body_characters(input_type)
+                and body_characters >= _min_concise_structured_body_characters(input_type)
                 and body_lexical_token_count >= 1
             )
         ),
@@ -744,15 +683,11 @@ def _normalize_analysis_line(line: str) -> str:
     return MARKDOWN_PREFIX_PATTERN.sub("", line.strip()).strip()
 
 
-def _iter_content_lines(
-    markdown_text: str,
-    *,
-    normalize_analysis_line=_normalize_analysis_line,
-) -> list[str]:
+def _iter_content_lines(markdown_text: str) -> list[str]:
     return [
         normalized
         for raw_line in markdown_text.splitlines()
-        if (normalized := normalize_analysis_line(raw_line))
+        if (normalized := _normalize_analysis_line(raw_line))
     ]
 
 
@@ -760,39 +695,33 @@ def _is_cjk_character(character: str) -> bool:
     return "\u4e00" <= character <= "\u9fff"
 
 
-def _compute_ocr_noise_ratio(
-    markdown_text: str,
-    *,
-    is_suspicious_token=None,
-) -> float:
-    if is_suspicious_token is None:
-        is_suspicious_token = _is_suspicious_token
+def _compute_ocr_noise_ratio(markdown_text: str) -> float:
     tokens = TOKEN_PATTERN.findall(markdown_text)
-    analyzable_tokens = [token for token in tokens if re.search(r"[A-Za-z0-9\u4e00-\u9fff]", token)]
+    analyzable_tokens = [
+        token
+        for token in tokens
+        if re.search(r"[A-Za-z0-9\u4e00-\u9fff]", token)
+    ]
     if not analyzable_tokens:
         return 0.0
 
-    suspicious_count = sum(1 for token in analyzable_tokens if is_suspicious_token(token))
+    suspicious_count = sum(1 for token in analyzable_tokens if _is_suspicious_token(token))
     return suspicious_count / len(analyzable_tokens)
 
 
-def _is_suspicious_token(
-    token: str,
-    *,
-    is_cjk_character=_is_cjk_character,
-) -> bool:
+def _is_suspicious_token(token: str) -> bool:
     core = token.strip(".,;:!?()[]{}<>\"'`|/\\+-=_~")
     if not core:
         return False
 
     letters = sum(character.isalpha() for character in core)
     digits = sum(character.isdigit() for character in core)
-    cjk = sum(is_cjk_character(character) for character in core)
+    cjk = sum(_is_cjk_character(character) for character in core)
     punctuation = len(core) - letters - digits - cjk
     latin_letters = [
         character
         for character in core
-        if character.isalpha() and not is_cjk_character(character)
+        if character.isalpha() and not _is_cjk_character(character)
     ]
     uppercase_count = sum(character.isupper() for character in latin_letters)
     lowercase_count = sum(character.islower() for character in latin_letters)
@@ -802,7 +731,8 @@ def _is_suspicious_token(
     if letters >= 5 and latin_letters:
         uppercase_ratio = uppercase_count / len(latin_letters)
         vowel_ratio = (
-            sum(character.lower() in "aeiou" for character in latin_letters) / len(latin_letters)
+            sum(character.lower() in "aeiou" for character in latin_letters)
+            / len(latin_letters)
         )
         if uppercase_ratio >= 0.8:
             return True
@@ -825,27 +755,19 @@ def _is_suspicious_token(
     return False
 
 
-def _compute_line_structure_signal(
-    markdown_text: str,
-    *,
-    iter_content_lines=_iter_content_lines,
-    compact_character_count=_compact_character_count,
-    is_coherent_line=None,
-) -> float:
-    if is_coherent_line is None:
-        is_coherent_line = _is_coherent_line
-    content_lines = iter_content_lines(markdown_text)
+def _compute_line_structure_signal(markdown_text: str) -> float:
+    content_lines = _iter_content_lines(markdown_text)
     if not content_lines:
         return 0.0
 
     total_characters = 0
     coherent_characters = 0
     for line in content_lines:
-        line_length = compact_character_count(line)
+        line_length = _compact_character_count(line)
         if line_length == 0:
             continue
         total_characters += line_length
-        if is_coherent_line(line, line_length):
+        if _is_coherent_line(line, line_length):
             coherent_characters += line_length
 
     if total_characters == 0:
@@ -853,15 +775,12 @@ def _compute_line_structure_signal(
     return coherent_characters / total_characters
 
 
-def _is_coherent_line(
-    line: str,
-    line_length: int,
-    *,
-    is_cjk_character=_is_cjk_character,
-) -> bool:
+def _is_coherent_line(line: str, line_length: int) -> bool:
     word_count = len(line.split())
-    cjk_count = sum(is_cjk_character(character) for character in line)
-    sentence_like_end = line.endswith((".", "。", "!", "！", "?", "？", ":", "：", ";", "；"))
+    cjk_count = sum(_is_cjk_character(character) for character in line)
+    sentence_like_end = line.endswith(
+        (".", "。", "!", "！", "?", "？", ":", "：", ";", "；")
+    )
 
     return bool(
         line_length >= 45
@@ -871,27 +790,19 @@ def _is_coherent_line(
     )
 
 
-def _compute_table_fragment_signal(
-    markdown_text: str,
-    *,
-    iter_content_lines=_iter_content_lines,
-    compact_character_count=_compact_character_count,
-    looks_like_fragmented_table_line=None,
-) -> float:
-    if looks_like_fragmented_table_line is None:
-        looks_like_fragmented_table_line = _looks_like_fragmented_table_line
-    content_lines = iter_content_lines(markdown_text)
+def _compute_table_fragment_signal(markdown_text: str) -> float:
+    content_lines = _iter_content_lines(markdown_text)
     if not content_lines:
         return 0.0
 
     total_characters = 0
     fragmented_characters = 0
     for line in content_lines:
-        line_length = compact_character_count(line)
+        line_length = _compact_character_count(line)
         if line_length == 0:
             continue
         total_characters += line_length
-        if looks_like_fragmented_table_line(line):
+        if _looks_like_fragmented_table_line(line):
             fragmented_characters += line_length
 
     if total_characters == 0:
@@ -925,15 +836,9 @@ def _looks_like_fragmented_table_line(line: str) -> bool:
     return False
 
 
-def _compute_content_trust_signals(
-    markdown_text: str,
-    *,
-    compute_ocr_noise_ratio=_compute_ocr_noise_ratio,
-    compute_line_structure_signal=_compute_line_structure_signal,
-    compute_table_fragment_signal=_compute_table_fragment_signal,
-) -> dict[str, float]:
+def _compute_content_trust_signals(markdown_text: str) -> dict[str, float]:
     return {
-        "ocr_noise_ratio": compute_ocr_noise_ratio(markdown_text),
-        "line_structure_signal": compute_line_structure_signal(markdown_text),
-        "table_fragment_signal": compute_table_fragment_signal(markdown_text),
+        "ocr_noise_ratio": _compute_ocr_noise_ratio(markdown_text),
+        "line_structure_signal": _compute_line_structure_signal(markdown_text),
+        "table_fragment_signal": _compute_table_fragment_signal(markdown_text),
     }

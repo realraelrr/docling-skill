@@ -15,7 +15,7 @@ from .constants import (
     SOURCE_IMAGES_NAME,
     SOURCE_MARKDOWN_NAME,
 )
-from .models import ImageSidecar, PageArtifacts, QualityReport
+from .models import AttemptManifest, ImageSidecar, PageArtifacts, QualityReport, SourceMeta
 from .routing import detect_input_type
 
 
@@ -33,13 +33,13 @@ def infer_source_title(markdown_text: str, input_path: Path) -> str:
 def build_source_meta(
     *,
     input_path: Path | str,
-    manifest: dict[str, Any],
+    manifest: AttemptManifest,
     markdown_text: str,
     job_id: str | None = None,
     source_title: str | None = None,
     detect_input_type_func=detect_input_type,
     infer_source_title_func=infer_source_title,
-) -> dict[str, Any]:
+) -> SourceMeta:
     normalized_input_path = Path(input_path)
     quality = manifest["quality"]
 
@@ -68,7 +68,7 @@ def _serialize_page_quality(
     }
 
 
-def _apply_artifact_authority(manifest: dict[str, Any]) -> dict[str, Any]:
+def _apply_artifact_authority(manifest: AttemptManifest) -> AttemptManifest:
     normalized_manifest = deepcopy(manifest)
     if "quality" in normalized_manifest:
         _quality_helpers._ensure_quality_evidence_fields(normalized_manifest["quality"])
@@ -92,9 +92,7 @@ def _build_attempt_manifest(
     page_outputs: dict[int, PageArtifacts],
     page_count: int | None = None,
     remediated_pages: list[int] | None = None,
-    serialize_page_quality=_serialize_page_quality,
-    apply_artifact_authority=_apply_artifact_authority,
-) -> dict[str, Any]:
+) -> AttemptManifest:
     manifest = {
         "source_file": str(pdf_path),
         "input_type": input_type,
@@ -107,21 +105,17 @@ def _build_attempt_manifest(
         "document_markdown": SOURCE_MARKDOWN_NAME,
         "images_json": SOURCE_IMAGES_NAME,
         "quality": quality,
-        "page_quality": serialize_page_quality(page_outputs),
+        "page_quality": _serialize_page_quality(page_outputs),
     }
     if ocr_metadata is not None:
         manifest["ocr"] = ocr_metadata
     if remediated_pages:
         manifest["remediated_pages"] = remediated_pages
-    return apply_artifact_authority(manifest)
+    return _apply_artifact_authority(manifest)
 
 
-def _finalize_selected_manifest(
-    manifest: dict[str, Any],
-    *,
-    apply_artifact_authority=_apply_artifact_authority,
-) -> dict[str, Any]:
-    finalized = apply_artifact_authority(manifest)
+def _finalize_selected_manifest(manifest: AttemptManifest) -> AttemptManifest:
+    finalized = _apply_artifact_authority(manifest)
     quality = _quality_helpers._ensure_quality_evidence_fields(finalized["quality"])
 
     if finalized.get("attempt") != "primary" and quality.get("agent_ready"):
