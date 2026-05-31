@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata as package_metadata
 import re
 from copy import deepcopy
 from pathlib import Path
@@ -11,7 +12,9 @@ from . import quality as _quality_helpers
 from .constants import (
     AUTHORITATIVE_ARTIFACT,
     AVAILABLE_ARTIFACTS,
+    CONTRACT_VERSION,
     PREFERRED_AGENT_ARTIFACT,
+    PRODUCER_NAME,
     SOURCE_IMAGES_NAME,
     SOURCE_MARKDOWN_NAME,
 )
@@ -72,6 +75,13 @@ def _apply_artifact_authority(manifest: AttemptManifest) -> AttemptManifest:
     normalized_manifest = deepcopy(manifest)
     if "quality" in normalized_manifest:
         _quality_helpers._ensure_quality_evidence_fields(normalized_manifest["quality"])
+    normalized_manifest["contract_version"] = CONTRACT_VERSION
+    normalized_manifest["producer"] = {
+        "name": PRODUCER_NAME,
+        "version": package_metadata.version(PRODUCER_NAME),
+        "docling_version": package_metadata.version("docling"),
+        "docling_core_version": package_metadata.version("docling-core"),
+    }
     normalized_manifest["preferred_agent_artifact"] = PREFERRED_AGENT_ARTIFACT
     normalized_manifest["authoritative_artifact"] = AUTHORITATIVE_ARTIFACT
     normalized_manifest["available_artifacts"] = list(AVAILABLE_ARTIFACTS)

@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 proxy = ["socksio>=1.0.0"]
-dev = ["ruff>=0.8,<1.0"]
+dev = ["pytest>=8,<9", "ruff>=0.8,<1.0"]
 
 [project.scripts]
 docling-skill = "docling_skill.cli:main"

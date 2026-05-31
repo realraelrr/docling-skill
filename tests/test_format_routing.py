@@ -1,4 +1,5 @@
 import base64
+import importlib.metadata as package_metadata
 import json
 import zlib
 from pathlib import Path
@@ -6,6 +7,7 @@ from pathlib import Path
 import pytest
 from docling.datamodel.base_models import ConversionStatus, InputFormat
 
+import docling_skill
 import docling_skill.core as core
 from docling_skill import artifacts as artifact_helpers
 
@@ -62,6 +64,9 @@ def _assert_source_sidecar_contract(
     assert meta_path.name == "source.meta.json"
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    _assert_manifest_contract_metadata(manifest)
+    for attempt in manifest["attempts"]:
+        _assert_manifest_contract_metadata(attempt)
     assert manifest["document_markdown"] == "source.md"
     assert manifest["images_json"] == "source.images.json"
     assert manifest["preferred_agent_artifact"] == "source.md"
@@ -87,6 +92,16 @@ def _assert_source_sidecar_contract(
     docling_document = json.loads(docling_json_path.read_text(encoding="utf-8"))
     assert docling_document == outputs["docling_document"]
     assert docling_document["schema_name"] == "DoclingDocument"
+
+
+def _assert_manifest_contract_metadata(manifest: dict[str, object]) -> None:
+    assert manifest["contract_version"] == "1.2"
+    assert manifest["producer"] == {
+        "name": "docling-skill",
+        "version": docling_skill.__version__,
+        "docling_version": package_metadata.version("docling"),
+        "docling_core_version": package_metadata.version("docling-core"),
+    }
 
 
 def _docling_json_text_values(docling_document: object) -> set[str]:

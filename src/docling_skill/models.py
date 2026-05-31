@@ -47,6 +47,8 @@ class SpreadsheetMetadata(TypedDict, total=False):
 
 
 class AttemptManifest(TypedDict, total=False):
+    contract_version: str
+    producer: dict[str, str]
     source_file: str
     input_type: str
     pipeline_family: str

@@ -58,7 +58,7 @@ Use `source.manifest.json` before consuming any other output.
 
 Artifact roles:
 
-- `source.manifest.json`: Quality risk, routing, remediation, `preferred_agent_artifact`, `authoritative_artifact`, `available_artifacts`, selected attempt metadata, and evidence signals.
+- `source.manifest.json`: Contract metadata, producer/runtime versions, quality risk, routing, remediation, `preferred_agent_artifact`, `authoritative_artifact`, `available_artifacts`, selected attempt metadata, and evidence signals.
 - `source.md`: Default agent-readable Markdown. Image placeholders appear as `[[image:picture-p3-0]]`. Narrow CJK cleanup may be applied here for agent readability.
 - `source.docling.json`: Authoritative structured Docling export from the same conversion result as `source.md`; use for recovery, machine-readable structure, or deeper inspection. It is not rewritten by the CJK Markdown cleanup.
 - `source.images.json`: Extracted image sidecars with `id`, `placeholder`, `page_no`, `bbox`, `mime_type`, and `base64` when image extraction is available.
@@ -85,6 +85,8 @@ Minimum fields to inspect:
 - `manifest["quality"]["warnings"]`
 - `manifest["quality"]["signals"]`
 - `manifest["quality"]["content_trust"]`
+- `manifest["contract_version"]`
+- `manifest["producer"]`
 - `manifest["preferred_agent_artifact"]`
 - `manifest["authoritative_artifact"]`
 - `manifest["available_artifacts"]`
@@ -99,15 +101,20 @@ python3 -c 'import json, pathlib; p = pathlib.Path("PATH_TO_MANIFEST"); m = json
 2. Run the extractor.
 3. Read `source.manifest.json` before consuming `source.md`.
 4. Decide from `manifest["quality"]`:
-   - `good` with `risk_level: low`: no hard failure was detected; use `source.md` as the primary text artifact.
-   - `good` with `risk_level: medium`: `source.md` is default-usable, but check `warnings` and `signals` before relying on it.
-   - `salvaged`: use `source.md`, but treat it as OCR-remediated and medium risk.
-   - `failed_for_agent`: do not present it as clean ingestion; report the failure and the manifest reasons.
-   - `agent_ready: true` means `source.md` is a default agent input; it does not prove semantic fidelity.
-   - For Chinese-heavy output, inspect `signals.text_normalization` and `signals.text_integrity` for CJK glyph cleanup, bad replacement characters, and formula placeholders.
-   - For PDFs with page warnings, inspect `signals.page_coverage.failed_pages` and `signals.page_coverage.first_page_failed`; long documents can be medium risk when only isolated pages failed.
-   - For text-native inputs, `good` means minimum usable structure survived in Markdown; it is not just "the parse succeeded" or "the Markdown is non-empty."
-   - For `docx`, `html`, and `md`, accept surviving paragraph/body structure, including concise body text, or preserved list structure when the list is the document's real content; `txt` stays looser.
+
+| Status / risk | Action |
+| --- | --- |
+| `good` / `low` | Use `source.md` as the primary agent input. |
+| `good` / `medium` | Use `source.md`, but inspect `warnings` and `signals` before relying on details. |
+| `salvaged` | Use `source.md` only as OCR-remediated medium-risk output. |
+| `failed_for_agent` | Do not present it as clean ingestion; report `reasons` and relevant `signals`. |
+
+`agent_ready: true` means `source.md` is a default agent input; it does not prove semantic fidelity.
+
+Inspect format-specific evidence when relevant:
+- Chinese-heavy output: `signals.text_normalization` and `signals.text_integrity`.
+- PDFs with page warnings: `signals.page_coverage.failed_pages` and `signals.page_coverage.first_page_failed`.
+- Text-native inputs: `good` means minimum usable body or list structure survived, not just that parsing succeeded.
 5. Treat `manifest["preferred_agent_artifact"]` as the default agent entrypoint. In this contract that is always `source.md`.
 6. Treat `manifest["authoritative_artifact"]` as the recovery/deep-inspection artifact. In this contract that is always `source.docling.json`.
 7. Check `manifest["selected_attempt"]` to see which attempt won. A remediation attempt can still end as `failed_for_agent`.

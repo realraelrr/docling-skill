@@ -20,6 +20,13 @@
 | `source.images.json` | 始终写出的图片 sidecar 列表；无法提图或没有图片时为空数组 |
 | `source.meta.json` | 供下游 workflow 使用的轻量 ingestion 元数据 |
 
+`source.manifest.json` 包含供下游 agent 检查的顶层契约元数据：
+
+- `contract_version`：当前 sidecar 契约版本，目前是 `1.2`
+- `producer.name`：`docling-skill`
+- `producer.version`：产出这些 sidecar 的包版本
+- `producer.docling_version` 和 `producer.docling_core_version`：解析运行时版本
+
 下游消费规则：
 
 1. 先读 `source.manifest.json`。

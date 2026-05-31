@@ -26,6 +26,14 @@ Each successful conversion writes:
 | `source.images.json` | Always-written image sidecar list; empty when extraction is unavailable or no images are found |
 | `source.meta.json` | Lightweight ingestion metadata for downstream workflows |
 
+`source.manifest.json` includes top-level contract metadata for downstream
+agents:
+
+- `contract_version`: current sidecar contract version, currently `1.2`
+- `producer.name`: `docling-skill`
+- `producer.version`: package version that produced the sidecars
+- `producer.docling_version` and `producer.docling_core_version`: parser runtime versions
+
 Downstream rule:
 
 1. Read `source.manifest.json` first.
