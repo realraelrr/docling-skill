@@ -2,8 +2,12 @@ import importlib.metadata as package_metadata
 import json
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 import pytest
-import tomllib
 from docling_core.types.doc import BoundingBox, CoordOrigin, Size
 from docling_core.types.doc.document import DocItemLabel, DoclingDocument, ProvenanceItem
 
