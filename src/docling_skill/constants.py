@@ -10,6 +10,7 @@ from docling.datamodel.base_models import InputFormat
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_VERSION = "1.2"
 PRODUCER_NAME = "docling-skill"
+PRODUCER_VERSION = "1.2.1"
 IMAGE_PLACEHOLDER = "<!-- image -->"
 IMAGE_TOKEN_PATTERN = re.compile(r"\[\[image:[^\]]+\]\]")
 MARKDOWN_PREFIX_PATTERN = re.compile(r"^(#{1,6}\s+|[-*+]\s+|\d+\.\s+)")

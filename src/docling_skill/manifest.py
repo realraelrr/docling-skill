@@ -15,6 +15,7 @@ from .constants import (
     CONTRACT_VERSION,
     PREFERRED_AGENT_ARTIFACT,
     PRODUCER_NAME,
+    PRODUCER_VERSION,
     SOURCE_IMAGES_NAME,
     SOURCE_MARKDOWN_NAME,
 )
@@ -78,7 +79,7 @@ def _apply_artifact_authority(manifest: AttemptManifest) -> AttemptManifest:
     normalized_manifest["contract_version"] = CONTRACT_VERSION
     normalized_manifest["producer"] = {
         "name": PRODUCER_NAME,
-        "version": package_metadata.version(PRODUCER_NAME),
+        "version": PRODUCER_VERSION,
         "docling_version": package_metadata.version("docling"),
         "docling_core_version": package_metadata.version("docling-core"),
     }
