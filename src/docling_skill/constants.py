@@ -8,25 +8,21 @@ from pathlib import Path
 from docling.datamodel.base_models import InputFormat
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CONTRACT_VERSION = "1.2"
+CONTRACT_VERSION = "2.0"
 PRODUCER_NAME = "docling-skill"
-PRODUCER_VERSION = "1.2.1"
+PRODUCER_VERSION = "2.0.0"
 IMAGE_PLACEHOLDER = "<!-- image -->"
 IMAGE_TOKEN_PATTERN = re.compile(r"\[\[image:[^\]]+\]\]")
 MARKDOWN_PREFIX_PATTERN = re.compile(r"^(#{1,6}\s+|[-*+]\s+|\d+\.\s+)")
 TOKEN_PATTERN = re.compile(r"[^\s]+")
 SOURCE_MARKDOWN_NAME = "source.md"
-SOURCE_DOCLING_JSON_NAME = "source.docling.json"
-SOURCE_IMAGES_NAME = "source.images.json"
+SOURCE_EVIDENCE_NAME = "source.evidence.json"
 SOURCE_MANIFEST_NAME = "source.manifest.json"
-SOURCE_META_NAME = "source.meta.json"
-AVAILABLE_ARTIFACTS = [
-    SOURCE_MARKDOWN_NAME,
-    SOURCE_DOCLING_JSON_NAME,
-    SOURCE_IMAGES_NAME,
-]
-PREFERRED_AGENT_ARTIFACT = SOURCE_MARKDOWN_NAME
-AUTHORITATIVE_ARTIFACT = SOURCE_DOCLING_JSON_NAME
+STALE_SOURCE_SIDECAR_NAMES = (
+    "source.docling.json",
+    "source.images.json",
+    "source.meta.json",
+)
 MIN_AGENT_TEXT_CHARACTERS = 120
 MIN_AGENT_PAGE_TEXT_CHARACTERS = 40
 MAX_OCR_NOISE_RATIO = 0.25

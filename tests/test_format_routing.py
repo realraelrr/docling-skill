@@ -29,8 +29,6 @@ def _fake_attempt(input_path: Path, *, input_type: str, pipeline_family: str) ->
             "page_count": 1,
             "image_count": 0,
             "text_characters": 32,
-            "document_markdown": "source.md",
-            "images_json": "source.images.json",
             "input_type": input_type,
             "pipeline_family": pipeline_family,
             "quality": {
@@ -51,51 +49,57 @@ def _assert_source_sidecar_contract(
     expected_quality_status: str = "good",
     expected_agent_ready: bool = True,
 ):
-    markdown_path = outputs["markdown_path"]
-    images_path = outputs["images_path"]
-    docling_json_path = outputs["docling_json_path"]
+    content_path = outputs["content_path"]
+    evidence_path = outputs["evidence_path"]
     manifest_path = outputs["manifest_path"]
-    meta_path = outputs["meta_path"]
 
-    assert markdown_path.name == "source.md"
-    assert images_path.name == "source.images.json"
-    assert docling_json_path.name == "source.docling.json"
+    assert content_path.name == "source.md"
+    assert evidence_path.name == "source.evidence.json"
     assert manifest_path.name == "source.manifest.json"
-    assert meta_path.name == "source.meta.json"
+    assert "markdown_path" not in outputs
+    assert "images_path" not in outputs
+    assert "docling_json_path" not in outputs
+    assert "meta_path" not in outputs
+    assert not (manifest_path.parent / "source.images.json").exists()
+    assert not (manifest_path.parent / "source.docling.json").exists()
+    assert not (manifest_path.parent / "source.meta.json").exists()
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     _assert_manifest_contract_metadata(manifest)
-    for attempt in manifest["attempts"]:
+    assert "quality" not in manifest
+    assert "attempts" not in manifest
+    assert "page_quality" not in manifest
+    assert "signals" not in json.dumps(manifest)
+    assert manifest["artifacts"] == {
+        "content": "source.md",
+        "evidence": "source.evidence.json",
+    }
+    assert manifest["source"]["input_type"] == expected_input_type
+    assert manifest["source"]["pipeline_family"] == expected_pipeline_family
+    assert manifest["decision"]["status"] == expected_quality_status
+    assert manifest["decision"]["agent_ready"] is expected_agent_ready
+    if expected_quality_status == "good":
+        assert manifest["decision"]["read_order"][0] == "source.md"
+    else:
+        assert manifest["decision"]["read_order"] == ["source.evidence.json"]
+
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    _assert_manifest_contract_metadata(evidence)
+    for attempt in evidence["attempts"]:
         _assert_manifest_contract_metadata(attempt)
-    assert manifest["document_markdown"] == "source.md"
-    assert manifest["images_json"] == "source.images.json"
-    assert manifest["preferred_agent_artifact"] == "source.md"
-    assert manifest["authoritative_artifact"] == "source.docling.json"
-    assert manifest["available_artifacts"] == [
-        "source.md",
-        "source.docling.json",
-        "source.images.json",
-    ]
-    assert manifest["input_type"] == expected_input_type
-    assert manifest["pipeline_family"] == expected_pipeline_family
-    assert manifest["quality"]["status"] == expected_quality_status
-    assert manifest["quality"]["agent_ready"] is expected_agent_ready
+    assert evidence["source"]["input_type"] == expected_input_type
+    assert evidence["source"]["pipeline_family"] == expected_pipeline_family
+    assert evidence["quality"]["status"] == expected_quality_status
+    assert evidence["quality"]["agent_ready"] is expected_agent_ready
+    assert evidence["images"] == []
 
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    assert meta["input_type"] == expected_input_type
-    assert meta["pipeline_family"] == expected_pipeline_family
-    assert meta["quality_status"] == expected_quality_status
-
-    images = json.loads(images_path.read_text(encoding="utf-8"))
-    assert images == []
-
-    docling_document = json.loads(docling_json_path.read_text(encoding="utf-8"))
-    assert docling_document == outputs["docling_document"]
+    docling_document = evidence["structured_document"]
+    assert docling_document == outputs["evidence"]["structured_document"]
     assert docling_document["schema_name"] == "DoclingDocument"
 
 
 def _assert_manifest_contract_metadata(manifest: dict[str, object]) -> None:
-    assert manifest["contract_version"] == "1.2"
+    assert manifest["contract_version"] == "2.0"
     assert manifest["producer"] == {
         "name": "docling-skill",
         "version": docling_skill.__version__,
@@ -188,10 +192,38 @@ def test_convert_document_routes_text_native_inputs(
     )
 
     assert calls == [(suffix, expected_type)]
-    assert outputs["manifest"]["input_type"] == expected_type
-    assert outputs["manifest"]["pipeline_family"] == "simple"
-    assert outputs["meta"]["input_type"] == expected_type
-    assert outputs["meta"]["pipeline_family"] == "simple"
+    assert outputs["manifest"]["source"]["input_type"] == expected_type
+    assert outputs["manifest"]["source"]["pipeline_family"] == "simple"
+    assert outputs["evidence"]["source"]["input_type"] == expected_type
+    assert outputs["evidence"]["source"]["pipeline_family"] == "simple"
+
+
+def test_pdf_audit_is_soft_evidence_for_native_formats(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    input_path = tmp_path / "example.docx"
+    output_dir = tmp_path / "out-docx"
+
+    def fake_text_native_converter(path: Path, *, input_type: str) -> tuple[core.AttemptArtifacts, list[dict[str, object]]]:
+        attempt = _fake_attempt(
+            path,
+            input_type=input_type,
+            pipeline_family="simple",
+        )
+        return attempt, [attempt.manifest]
+
+    monkeypatch.setattr(core, "_convert_text_native_input", fake_text_native_converter, raising=False)
+
+    outputs = core.convert_document_to_ingestion_outputs(
+        input_path=input_path,
+        output_dir=output_dir,
+        pdf_audit=True,
+    )
+
+    assert outputs["manifest"]["source"]["input_type"] == "docx"
+    assert outputs["evidence"]["pdf_audit"]["enabled"] is True
+    assert outputs["evidence"]["pdf_audit"]["status"] == "unavailable"
 
 
 def test_convert_document_routes_pdf_inputs_to_pdf_path(
@@ -230,10 +262,10 @@ def test_convert_document_routes_pdf_inputs_to_pdf_path(
     )
 
     assert calls == [".pdf"]
-    assert outputs["manifest"]["input_type"] == "pdf"
-    assert outputs["manifest"]["pipeline_family"] == "standard_pdf"
-    assert outputs["meta"]["input_type"] == "pdf"
-    assert outputs["meta"]["pipeline_family"] == "standard_pdf"
+    assert outputs["manifest"]["source"]["input_type"] == "pdf"
+    assert outputs["manifest"]["source"]["pipeline_family"] == "standard_pdf"
+    assert outputs["evidence"]["source"]["input_type"] == "pdf"
+    assert outputs["evidence"]["source"]["pipeline_family"] == "standard_pdf"
 
 
 @pytest.mark.parametrize(
@@ -286,11 +318,11 @@ def test_convert_document_routes_supported_spreadsheet_inputs_to_spreadsheet_pat
     )
 
     assert calls == [(suffix, expected_type)]
-    assert outputs["manifest"]["input_type"] == expected_type
-    assert outputs["manifest"]["pipeline_family"] == "spreadsheet"
-    assert outputs["manifest"]["spreadsheet"]["table_count"] == 1
-    assert outputs["meta"]["input_type"] == expected_type
-    assert outputs["meta"]["pipeline_family"] == "spreadsheet"
+    assert outputs["manifest"]["source"]["input_type"] == expected_type
+    assert outputs["manifest"]["source"]["pipeline_family"] == "spreadsheet"
+    assert outputs["evidence"]["spreadsheet"]["table_count"] == 1
+    assert outputs["evidence"]["source"]["input_type"] == expected_type
+    assert outputs["evidence"]["source"]["pipeline_family"] == "spreadsheet"
 
 
 @pytest.mark.parametrize(
@@ -344,10 +376,10 @@ def test_convert_document_routes_pptx_and_image_inputs_to_docling_paths(
     )
 
     assert calls == [(expected_pipeline_family, suffix, expected_type)]
-    assert outputs["manifest"]["input_type"] == expected_type
-    assert outputs["manifest"]["pipeline_family"] == expected_pipeline_family
-    assert outputs["meta"]["input_type"] == expected_type
-    assert outputs["meta"]["pipeline_family"] == expected_pipeline_family
+    assert outputs["manifest"]["source"]["input_type"] == expected_type
+    assert outputs["manifest"]["source"]["pipeline_family"] == expected_pipeline_family
+    assert outputs["evidence"]["source"]["input_type"] == expected_type
+    assert outputs["evidence"]["source"]["pipeline_family"] == expected_pipeline_family
 
 
 @pytest.mark.parametrize(
@@ -377,7 +409,7 @@ def test_detect_input_type_keeps_unsupported_formats_unrouted(filename: str):
 def test_convert_document_rejects_unsupported_input_types(tmp_path: Path, filename: str):
     input_path = tmp_path / filename
     expected_suffix_pattern = input_path.suffix.replace(".", r"\.")
-    with pytest.raises(NotImplementedError, match=expected_suffix_pattern):
+    with pytest.raises(NotImplementedError, match=rf"v2 ingestion contract: {expected_suffix_pattern}"):
         core.convert_document_to_ingestion_outputs(
             input_path=input_path,
             output_dir=tmp_path / f"out-{input_path.suffix.lstrip('.')}",
@@ -404,7 +436,7 @@ def test_convert_document_rejects_legacy_office_formats_with_guidance(
 
 
 def test_convert_document_rejects_xlsm_with_manual_preprocess_guidance(tmp_path: Path):
-    with pytest.raises(NotImplementedError, match=r"Save as \.xlsx or \.csv"):
+    with pytest.raises(NotImplementedError, match=r"v2 ingestion contract: \.xlsm"):
         core.convert_document_to_ingestion_outputs(
             input_path=tmp_path / "macro.xlsm",
             output_dir=tmp_path / "out-xlsm",
@@ -448,9 +480,9 @@ def test_convert_document_smoke_converts_real_text_native_files(
         expected_input_type=expected_type,
         expected_pipeline_family="simple",
     )
-    assert "Example Title" in outputs["markdown_text"]
-    assert expected_snippet in outputs["markdown_text"].lower()
-    assert outputs["manifest"]["quality"]["reasons"] == []
+    assert "Example Title" in outputs["content_text"]
+    assert expected_snippet in outputs["content_text"].lower()
+    assert outputs["manifest"]["reasons"] == []
 
 
 def test_convert_document_smoke_converts_real_docx_file(tmp_path: Path):
@@ -472,9 +504,9 @@ def test_convert_document_smoke_converts_real_docx_file(tmp_path: Path):
         expected_input_type="docx",
         expected_pipeline_family="simple",
     )
-    assert "Example Title" in outputs["markdown_text"]
-    assert "docx body should survive" in outputs["markdown_text"].lower()
-    assert outputs["manifest"]["quality"]["reasons"] == []
+    assert "Example Title" in outputs["content_text"]
+    assert "docx body should survive" in outputs["content_text"].lower()
+    assert outputs["manifest"]["reasons"] == []
 
 
 def test_convert_document_smoke_converts_real_pptx_file(tmp_path: Path):
@@ -497,10 +529,10 @@ def test_convert_document_smoke_converts_real_pptx_file(tmp_path: Path):
         expected_input_type="pptx",
         expected_pipeline_family="presentation",
     )
-    assert "Quarterly Plan" in outputs["markdown_text"]
-    assert "pptx body should survive" in outputs["markdown_text"].lower()
-    assert outputs["manifest"]["quality"]["reasons"] == []
-    assert outputs["manifest"]["quality"]["signals"]["text_normalization"]["applied"] is False
+    assert "Quarterly Plan" in outputs["content_text"]
+    assert "pptx body should survive" in outputs["content_text"].lower()
+    assert outputs["manifest"]["reasons"] == []
+    assert outputs["evidence"]["quality"]["signals"]["text_normalization"]["applied"] is False
 
 
 def test_convert_document_uses_structured_pages_for_pptx_page_count(tmp_path: Path):
@@ -521,10 +553,10 @@ def test_convert_document_uses_structured_pages_for_pptx_page_count(tmp_path: Pa
         output_dir=tmp_path / "out-pptx-pages",
     )
 
-    docling_json = json.loads(outputs["docling_json_path"].read_text(encoding="utf-8"))
+    docling_json = outputs["evidence"]["structured_document"]
     assert len(docling_json["pages"]) == 3
-    assert outputs["manifest"]["page_count"] == 3
-    assert outputs["manifest"]["attempts"][0]["page_count"] == 3
+    assert outputs["manifest"]["counts"]["pages"] == 3
+    assert outputs["evidence"]["attempts"][0]["page_count"] == 3
 
 
 @pytest.mark.parametrize(
@@ -561,9 +593,9 @@ def test_convert_document_smoke_converts_generated_images_as_high_risk_when_no_t
         expected_quality_status="failed_for_agent",
         expected_agent_ready=False,
     )
-    assert outputs["manifest"]["quality"]["risk_level"] == "high"
-    assert "low_text_content" in outputs["manifest"]["quality"]["reasons"]
-    assert outputs["manifest"]["quality"]["signals"]["text_normalization"]["applied"] is False
+    assert outputs["manifest"]["decision"]["risk_level"] == "high"
+    assert "low_text_content" in outputs["manifest"]["reasons"]
+    assert outputs["evidence"]["quality"]["signals"]["text_normalization"]["applied"] is False
 
 
 def test_convert_document_normalizes_agent_markdown_and_records_signal(tmp_path: Path):
@@ -578,9 +610,9 @@ def test_convert_document_normalizes_agent_markdown_and_records_signal(tmp_path:
         output_dir=tmp_path / "out-normalized-md",
     )
 
-    assert "南瓜书" in outputs["markdown_text"]
-    assert "周志华老师提醒读者" in outputs["markdown_text"]
-    normalization = outputs["manifest"]["quality"]["signals"]["text_normalization"]
+    assert "南瓜书" in outputs["content_text"]
+    assert "周志华老师提醒读者" in outputs["content_text"]
+    normalization = outputs["evidence"]["quality"]["signals"]["text_normalization"]
     assert normalization["applied"] is True
     assert normalization["cjk_compatibility_replacement_count"] >= 2
     assert normalization["cjk_space_merge_count"] >= 1
@@ -623,17 +655,18 @@ def test_convert_document_smoke_converts_real_xlsx_file_with_merged_cells(tmp_pa
         expected_pipeline_family="spreadsheet",
     )
     manifest = outputs["manifest"]
-    assert manifest["spreadsheet"]["sheet_count"] == 2
-    assert manifest["page_count"] == manifest["spreadsheet"]["sheet_count"]
-    assert manifest["spreadsheet"]["table_count"] >= 2
-    assert manifest["spreadsheet"]["merged_cell_count"] >= 3
-    assert manifest["spreadsheet"]["has_merged_cells"] is True
-    assert manifest["spreadsheet"]["has_multi_sheet"] is True
-    assert "FY2026 Revenue Plan" in outputs["markdown_text"]
-    assert "Department" in outputs["markdown_text"]
-    assert outputs["manifest"]["quality"]["agent_ready"] is True
+    spreadsheet = outputs["evidence"]["spreadsheet"]
+    assert spreadsheet["sheet_count"] == 2
+    assert manifest["counts"]["pages"] == spreadsheet["sheet_count"]
+    assert spreadsheet["table_count"] >= 2
+    assert spreadsheet["merged_cell_count"] >= 3
+    assert spreadsheet["has_merged_cells"] is True
+    assert spreadsheet["has_multi_sheet"] is True
+    assert "FY2026 Revenue Plan" in outputs["content_text"]
+    assert "Department" in outputs["content_text"]
+    assert outputs["manifest"]["decision"]["agent_ready"] is True
 
-    tables = outputs["docling_document"]["tables"]
+    tables = outputs["evidence"]["structured_document"]["tables"]
     assert len(tables) >= 2
     cells = [
         cell
@@ -643,7 +676,7 @@ def test_convert_document_smoke_converts_real_xlsx_file_with_merged_cells(tmp_pa
     assert any(cell["col_span"] > 1 for cell in cells)
     assert any(cell["row_span"] > 1 for cell in cells)
 
-    docling_json = json.loads(outputs["docling_json_path"].read_text(encoding="utf-8"))
+    docling_json = outputs["evidence"]["structured_document"]
     docling_text_values = _docling_json_text_values(docling_json)
     assert {"FY2026 Revenue Plan", "Region", "Department", "North"}.issubset(docling_text_values)
 
@@ -665,14 +698,14 @@ def test_convert_document_smoke_converts_real_csv_file(tmp_path: Path):
         expected_input_type="csv",
         expected_pipeline_family="spreadsheet",
     )
-    assert outputs["manifest"]["spreadsheet"]["source_format"] == "csv"
-    assert outputs["manifest"]["spreadsheet"]["sheet_count"] == 1
-    assert outputs["manifest"]["spreadsheet"]["table_count"] >= 1
-    assert "Region" in outputs["markdown_text"]
-    assert "North" in outputs["markdown_text"]
-    assert outputs["manifest"]["quality"]["agent_ready"] is True
+    assert outputs["evidence"]["spreadsheet"]["source_format"] == "csv"
+    assert outputs["evidence"]["spreadsheet"]["sheet_count"] == 1
+    assert outputs["evidence"]["spreadsheet"]["table_count"] >= 1
+    assert "Region" in outputs["content_text"]
+    assert "North" in outputs["content_text"]
+    assert outputs["manifest"]["decision"]["agent_ready"] is True
 
-    docling_json = json.loads(outputs["docling_json_path"].read_text(encoding="utf-8"))
+    docling_json = outputs["evidence"]["structured_document"]
     docling_text_values = _docling_json_text_values(docling_json)
     assert {"Region", "Online", "Retail", "North", "South"}.issubset(docling_text_values)
 
@@ -709,17 +742,17 @@ def test_convert_document_smoke_converts_real_xls_file(tmp_path: Path):
         expected_input_type="xls",
         expected_pipeline_family="spreadsheet",
     )
-    assert outputs["manifest"]["spreadsheet"]["source_format"] == "xls"
-    assert outputs["manifest"]["spreadsheet"]["normalized_from"] == "xls"
-    assert outputs["manifest"]["spreadsheet"]["sheet_count"] == 2
-    assert outputs["manifest"]["spreadsheet"]["table_count"] >= 2
-    assert outputs["manifest"]["spreadsheet"]["merged_cell_count"] >= 1
-    assert "FY2026 Revenue" in outputs["markdown_text"]
-    assert "Region" in outputs["markdown_text"]
-    assert "Department" in outputs["markdown_text"]
-    assert outputs["manifest"]["quality"]["agent_ready"] is True
+    assert outputs["evidence"]["spreadsheet"]["source_format"] == "xls"
+    assert outputs["evidence"]["spreadsheet"]["normalized_from"] == "xls"
+    assert outputs["evidence"]["spreadsheet"]["sheet_count"] == 2
+    assert outputs["evidence"]["spreadsheet"]["table_count"] >= 2
+    assert outputs["evidence"]["spreadsheet"]["merged_cell_count"] >= 1
+    assert "FY2026 Revenue" in outputs["content_text"]
+    assert "Region" in outputs["content_text"]
+    assert "Department" in outputs["content_text"]
+    assert outputs["manifest"]["decision"]["agent_ready"] is True
 
-    docling_json = json.loads(outputs["docling_json_path"].read_text(encoding="utf-8"))
+    docling_json = outputs["evidence"]["structured_document"]
     docling_text_values = _docling_json_text_values(docling_json)
     assert {"FY2026 Revenue", "Region", "Department", "North"}.issubset(docling_text_values)
 

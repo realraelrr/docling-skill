@@ -15,10 +15,8 @@ Supported local inputs:
 
 Outputs:
 - source.md: Markdown with stable image placeholders like [[image:picture-p2-0]]
-- source.docling.json: Structured Docling document export from the same conversion result
-- source.images.json: Image sidecars when extraction is available for the input
-- source.manifest.json: Quality and routing metadata for downstream consumers
-- source.meta.json: Lightweight ingestion metadata for downstream agents
+- source.manifest.json: Compact agent decision metadata
+- source.evidence.json: On-demand structured evidence, quality signals, attempts, and image sidecars
 
 Notes:
 - OCR flags mainly affect PDF ingestion.
@@ -56,7 +54,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "output_dir",
-        help="Explicit directory for source.md, source.docling.json, source.images.json, source.manifest.json, and source.meta.json.",
+        help="Explicit directory for source.md, source.manifest.json, and source.evidence.json.",
     )
     parser.add_argument(
         "--ocr-engine",
@@ -80,36 +78,41 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable the PDF full-page OCR retry used when the primary output fails agent-quality checks.",
     )
+    parser.add_argument(
+        "--pdf-audit",
+        action="store_true",
+        help="Record optional PDF audit intent for eligible native formats. Renderer support is not enabled by default.",
+    )
     return parser
 
 
 def _print_conversion_summary(input_path: Path, outputs: dict[str, Any]) -> None:
     manifest = outputs["manifest"]
-    meta = outputs["meta"]
-    markdown_text = outputs["markdown_text"]
-    images = outputs["images"]
+    evidence = outputs["evidence"]
+    decision = manifest["decision"]
+    content_text = outputs["content_text"]
 
-    print(f"Converted: {input_path.name} -> {outputs['markdown_path']}")
-    print(f"Characters: {len(markdown_text)}")
-    print(f"Images: {len(images)}")
-    print(f"Input type: {meta['input_type']}")
+    print(f"Converted: {input_path.name} -> {outputs['content_path']}")
+    print(f"Characters: {len(content_text)}")
+    print(f"Images: {len(evidence['images'])}")
+    print(f"Input type: {manifest['source']['input_type']}")
     print(
-        f"Quality: {manifest['quality']['status']} "
-        f"(risk_level={manifest['quality']['risk_level']}, "
-        f"agent_ready={manifest['quality']['agent_ready']})"
+        f"Quality: {decision['status']} "
+        f"(risk_level={decision['risk_level']}, "
+        f"agent_ready={decision['agent_ready']})"
     )
     print(
         "Sidecars: "
-        f"{outputs['docling_json_path'].name}, "
-        f"{outputs['images_path'].name}, "
         f"{outputs['manifest_path'].name}, "
-        f"{outputs['meta_path'].name}"
+        f"{outputs['evidence_path'].name}"
     )
+    print(f"Read order: {', '.join(decision['read_order'])}")
+    print(f"Evidence: {outputs['evidence_path'].name}")
     print(
-        f"Selected attempt: {manifest['selected_attempt']} "
-        f"(remediation_applied={manifest['ocr_remediation_applied']})"
+        f"Selected attempt: {evidence['selected_attempt']} "
+        f"(remediation_applied={evidence['ocr_remediation_applied']})"
     )
-    preview = markdown_text[:500]
+    preview = content_text[:500]
     print(f"\n=== Preview (first 500 chars) ===\n{preview}...")
 
 
@@ -128,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
         ocr_languages=args.ocr_languages,
         force_full_page_ocr=args.force_full_page_ocr,
         ocr_remediation=not args.no_ocr_remediation,
+        pdf_audit=args.pdf_audit,
     )
     _print_conversion_summary(input_path, outputs)
     return 0

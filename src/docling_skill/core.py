@@ -34,13 +34,12 @@ from .constants import (
     MIN_AGENT_PAGE_TEXT_CHARACTERS,
     PRESENTATION_INPUT_FORMATS,
     PRESENTATION_INPUT_TYPES,
-    SOURCE_DOCLING_JSON_NAME,
-    SOURCE_IMAGES_NAME,
+    SOURCE_EVIDENCE_NAME,
     SOURCE_MANIFEST_NAME,
     SOURCE_MARKDOWN_NAME,
-    SOURCE_META_NAME,
     SPREADSHEET_INPUT_FORMATS,
     SPREADSHEET_INPUT_TYPES,
+    STALE_SOURCE_SIDECAR_NAMES,
     TEXT_NATIVE_INPUT_FORMATS,
     TEXT_NATIVE_INPUT_TYPES,
 )
@@ -69,10 +68,8 @@ __all__ = [
 
 SOURCE_SIDECAR_NAMES = (
     SOURCE_MARKDOWN_NAME,
-    SOURCE_DOCLING_JSON_NAME,
-    SOURCE_IMAGES_NAME,
+    SOURCE_EVIDENCE_NAME,
     SOURCE_MANIFEST_NAME,
-    SOURCE_META_NAME,
 )
 
 
@@ -826,26 +823,26 @@ def _dispatch_conversion(
         )
     if input_type == "xlsm":
         raise NotImplementedError(
-            "Unsupported macro-enabled spreadsheet for v1 ingestion contract: .xlsm. "
+            "Unsupported macro-enabled spreadsheet for v2 ingestion contract: .xlsm. "
             "Save as .xlsx or .csv before ingestion."
         )
     if input_path.suffix.lower() == ".doc":
         raise NotImplementedError(
-            "Unsupported legacy Word format for v1 ingestion contract: .doc. "
+            "Unsupported legacy Word format for v2 ingestion contract: .doc. "
             "Save as .docx or PDF before ingestion."
         )
     if input_path.suffix.lower() == ".ppt":
         raise NotImplementedError(
-            "Unsupported legacy PowerPoint format for v1 ingestion contract: .ppt. "
+            "Unsupported legacy PowerPoint format for v2 ingestion contract: .ppt. "
             "Save as .pptx or PDF before ingestion."
         )
     raise NotImplementedError(
-        f"Unsupported input type for v1 ingestion contract: {input_path.suffix or '<no suffix>'}"
+        f"Unsupported input type for v2 ingestion contract: {input_path.suffix or '<no suffix>'}"
     )
 
 
 def _preflight_sidecar_publish_targets(output_dir: Path) -> None:
-    for filename in SOURCE_SIDECAR_NAMES:
+    for filename in (*SOURCE_SIDECAR_NAMES, *STALE_SOURCE_SIDECAR_NAMES):
         target = output_dir / filename
         if target.is_symlink() or (target.exists() and not target.is_file()):
             raise RuntimeError(
@@ -857,36 +854,30 @@ def _write_sidecars_with_staging(
     output_dir: Path,
     *,
     markdown_text: str,
-    structured_document: dict[str, Any],
-    images: list[ImageSidecar],
-    manifest: AttemptManifest,
-    meta: SourceMeta,
+    manifest: dict[str, Any],
+    evidence: dict[str, Any],
 ) -> None:
     _preflight_sidecar_publish_targets(output_dir)
 
     with tempfile.TemporaryDirectory(prefix=".docling-skill-", dir=output_dir) as tmp_dir:
         staging_dir = Path(tmp_dir)
         (staging_dir / SOURCE_MARKDOWN_NAME).write_text(markdown_text, encoding="utf-8")
-        (staging_dir / SOURCE_DOCLING_JSON_NAME).write_text(
-            json.dumps(structured_document, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        (staging_dir / SOURCE_IMAGES_NAME).write_text(
-            json.dumps(images, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
         (staging_dir / SOURCE_MANIFEST_NAME).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        (staging_dir / SOURCE_META_NAME).write_text(
-            json.dumps(meta, ensure_ascii=False, indent=2),
+        (staging_dir / SOURCE_EVIDENCE_NAME).write_text(
+            json.dumps(evidence, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
         _preflight_sidecar_publish_targets(output_dir)
         for filename in SOURCE_SIDECAR_NAMES:
             (staging_dir / filename).replace(output_dir / filename)
+        for filename in STALE_SOURCE_SIDECAR_NAMES:
+            stale_target = output_dir / filename
+            if stale_target.exists():
+                stale_target.unlink()
 
 
 def convert_document_to_ingestion_outputs(
@@ -898,6 +889,7 @@ def convert_document_to_ingestion_outputs(
     force_full_page_ocr: bool = False,
     ocr_remediation: bool = True,
     job_id: str | None = None,
+    pdf_audit: bool = False,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     normalized_languages = _ocr_helpers._normalize_ocr_languages(ocr_languages or [])
@@ -912,45 +904,42 @@ def convert_document_to_ingestion_outputs(
         ocr_remediation=ocr_remediation,
     )
 
-    markdown_path = output_dir / SOURCE_MARKDOWN_NAME
-    docling_json_path = output_dir / SOURCE_DOCLING_JSON_NAME
-    images_path = output_dir / SOURCE_IMAGES_NAME
+    content_path = output_dir / SOURCE_MARKDOWN_NAME
     manifest_path = output_dir / SOURCE_MANIFEST_NAME
-    meta_path = output_dir / SOURCE_META_NAME
+    evidence_path = output_dir / SOURCE_EVIDENCE_NAME
 
-    manifest = {
-        **_manifest_helpers._finalize_selected_manifest(selected_attempt.manifest),
-        "attempts": [_manifest_helpers._apply_artifact_authority(attempt) for attempt in attempts],
-        "selected_attempt": selected_attempt.manifest["attempt"],
-        "ocr_remediation_applied": len(attempts) > 1,
-    }
-    meta = build_source_meta(
+    selected_manifest = _manifest_helpers._finalize_selected_manifest(selected_attempt.manifest)
+    ocr_remediation_applied = len(attempts) > 1
+    manifest = _manifest_helpers._build_agent_manifest(
         input_path=input_path,
-        manifest=manifest,
         markdown_text=selected_attempt.markdown_text,
-        job_id=job_id,
+        selected_manifest=selected_manifest,
+    )
+    evidence = _manifest_helpers._build_evidence(
+        input_path=input_path,
+        selected_manifest=selected_manifest,
+        attempts=attempts,
+        markdown_text=selected_attempt.markdown_text,
+        structured_document=selected_attempt.structured_document,
+        images=selected_attempt.images,
+        ocr_remediation_applied=ocr_remediation_applied,
+        pdf_audit=pdf_audit,
     )
 
     _write_sidecars_with_staging(
         output_dir,
         markdown_text=selected_attempt.markdown_text,
-        structured_document=selected_attempt.structured_document,
-        images=selected_attempt.images,
         manifest=manifest,
-        meta=meta,
+        evidence=evidence,
     )
 
     return {
-        "markdown_path": markdown_path,
-        "docling_json_path": docling_json_path,
-        "images_path": images_path,
+        "content_path": content_path,
         "manifest_path": manifest_path,
-        "meta_path": meta_path,
-        "markdown_text": selected_attempt.markdown_text,
-        "docling_document": selected_attempt.structured_document,
-        "images": selected_attempt.images,
+        "evidence_path": evidence_path,
+        "content_text": selected_attempt.markdown_text,
         "manifest": manifest,
-        "meta": meta,
+        "evidence": evidence,
     }
 
 
@@ -963,6 +952,7 @@ def convert_pdf_to_sidecar_outputs(
     force_full_page_ocr: bool = False,
     ocr_remediation: bool = True,
     job_id: str | None = None,
+    pdf_audit: bool = False,
 ) -> dict[str, Any]:
     return convert_document_to_ingestion_outputs(
         input_path=pdf_path,
@@ -972,4 +962,5 @@ def convert_pdf_to_sidecar_outputs(
         force_full_page_ocr=force_full_page_ocr,
         ocr_remediation=ocr_remediation,
         job_id=job_id,
+        pdf_audit=pdf_audit,
     )

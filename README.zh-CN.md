@@ -10,34 +10,34 @@
 
 旧版 `.doc` 和 `.ppt` 文件有意不支持。请先另存为 `.docx`/`.pptx` 或 PDF，再执行 ingestion。
 
-每次成功转换都会写出：
+每次成功转换都会写出 agent-only v2 sidecar：
 
 | Artifact | 用途 |
 | --- | --- |
-| `source.manifest.json` | 质量风险、路由、补救路径和证据元数据 |
 | `source.md` | Agent 默认读取的 Markdown，会做有限 CJK 清洗 |
-| `source.docling.json` | 与 `source.md` 来自同一次转换结果的权威 Docling 结构化导出，保留 Docling 结构输出 |
-| `source.images.json` | 始终写出的图片 sidecar 列表；无法提图或没有图片时为空数组 |
-| `source.meta.json` | 供下游 workflow 使用的轻量 ingestion 元数据 |
+| `source.manifest.json` | 极简 agent 决策元数据和读取顺序 |
+| `source.evidence.json` | 按需读取的 Docling 结构、质量 signals、attempts、coverage、图片 sidecar 和可选 PDF audit 证据 |
 
 `source.manifest.json` 包含供下游 agent 检查的顶层契约元数据：
 
-- `contract_version`：当前 sidecar 契约版本，目前是 `1.2`
+- `contract_version`：当前 sidecar 契约版本，目前是 `2.0`
 - `producer.name`：`docling-skill`
 - `producer.version`：产出这些 sidecar 的包版本
 - `producer.docling_version` 和 `producer.docling_core_version`：解析运行时版本
+- `decision`：`status`、`risk_level`、`agent_ready` 和 `read_order`
+- `source`：源文件、附件名、推断标题、输入类型和 pipeline family
+- `artifacts`：正文和证据文件名
 
 下游消费规则：
 
 1. 先读 `source.manifest.json`。
-2. 检查 `quality.status`、`quality.risk_level`、`quality.warnings` 和 `quality.signals`。
-3. 如果 `quality.agent_ready` 为 true，`source.md` 可作为默认 agent 输入。
-4. 需要结构恢复、校正 Markdown 歧义或深入检查时，读取 `source.docling.json`。
-5. 通过 `source.images.json` 解析 `[[image:picture-p2-1]]` 这类图片占位符。
+2. 按 `decision.read_order` 读取。
+3. 低风险 `good` 输出默认只读 `source.md`。
+4. 出现 warning、`salvaged`、`failed_for_agent`、图片占位符、结构恢复或表格细节需求时，再读 `source.evidence.json`。
 
-自动质量模型只是风险筛查，不是语义审校。低风险表示没有检测到硬失败，不代表已经证明源文档语义保真或完整对齐。`good/medium` 表示默认可作为 agent 输入，但需要检查 `warnings` 和 `signals`。对于长 PDF，少量页级失败可能降级为 medium risk 而不是 hard failure；依赖封面、标题或摘要前，请检查 `quality.signals.page_coverage`，尤其是 `first_page_failed`。
+自动质量模型只是风险筛查，不是语义审校。低风险表示没有检测到硬失败，不代表已经证明源文档语义保真或完整对齐。`good/medium` 表示默认可作为 agent 输入，但需要检查 manifest `warnings` 和 evidence `quality.signals`。对于长 PDF，少量页级失败可能降级为 medium risk 而不是 hard failure；依赖封面、标题或摘要前，请检查 `source.evidence.json` 里的 `quality.signals.page_coverage`，尤其是 `first_page_failed`。
 
-对于中文为主的文档，`source.md` 会定向修正 CJK 兼容字形和中文字符之间的异常空格；对应证据记录在 `quality.signals.text_normalization`。`source.docling.json` 仍保留 Docling 的结构化导出，用于恢复和深入检查。
+对于中文为主的文档，`source.md` 会定向修正 CJK 兼容字形和中文字符之间的异常空格；对应证据记录在 evidence `quality.signals.text_normalization`。`source.evidence.json` 保留 Docling 的结构化导出，用于恢复和深入检查。
 
 图片输入使用与 OCR 类提取一致的 agent-ready 质量门。如果图片没有可用 OCR 文本，会被标记为高风险 `failed_for_agent`，不会被当作干净 ingestion。
 
@@ -46,14 +46,14 @@
 ## 安装
 
 ```bash
-pip install "git+https://github.com/realraelrr/docling-skill.git@v1.2.1"
+pip install "git+https://github.com/realraelrr/docling-skill.git@v2.0.0"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
 如果运行环境使用 SOCKS 代理：
 
 ```bash
-pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v1.2.1"
+pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v2.0.0"
 ```
 
 本地开发：
@@ -85,12 +85,15 @@ python -m docling_skill.cli "<input_path>" "<output_dir>"
 --ocr-lang <lang>
 --force-full-page-ocr
 --no-ocr-remediation
+--pdf-audit
 ```
+
+`--pdf-audit` 仅记录 eligible 原生格式的 PDF audit 意图。PDF audit 渲染是软证据路径，默认不可用；原生转换仍是主路径。
 
 检查 manifest：
 
 ```bash
-python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); q = m["quality"]; print({"status": q["status"], "risk_level": q["risk_level"], "agent_ready": q["agent_ready"], "warnings": q["warnings"], "selected_attempt": m["selected_attempt"]})'
+python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); d = m["decision"]; print({"status": d["status"], "risk_level": d["risk_level"], "agent_ready": d["agent_ready"], "read_order": d["read_order"], "warnings": m["warnings"]})'
 ```
 
 Python API：
@@ -106,17 +109,15 @@ outputs = convert_document_to_ingestion_outputs(
 )
 
 manifest = outputs["manifest"]
-if not manifest["quality"]["agent_ready"]:
-    raise RuntimeError(manifest["quality"])
+if not manifest["decision"]["agent_ready"]:
+    raise RuntimeError(manifest)
 
-if manifest["quality"]["risk_level"] != "low":
-    print(manifest["quality"]["warnings"])
-    print(manifest["quality"]["signals"])
+if "source.evidence.json" in manifest["decision"]["read_order"]:
+    print(outputs["evidence"]["quality"]["signals"])
 
-markdown_text = outputs["markdown_text"]
-structured_document = outputs["docling_document"]
-images = outputs["images"]
-meta = outputs["meta"]
+content_text = outputs["content_text"]
+structured_document = outputs["evidence"]["structured_document"]
+images = outputs["evidence"]["images"]
 ```
 
 ## Skill 引用格式
@@ -153,7 +154,7 @@ conda run -n docling python "$HOME/.codex/skills/.system/skill-creator/scripts/q
 conda run -n docling python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" .claude/skills/docling-skill
 
 conda run -n docling python -m ruff check .
-conda run -n docling python -m pytest
+PYTHONPATH="$PWD/src" conda run -n docling python -m pytest
 ```
 
 ## 范围

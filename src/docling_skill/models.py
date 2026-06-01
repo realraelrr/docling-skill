@@ -57,19 +57,52 @@ class AttemptManifest(TypedDict, total=False):
     page_count: int
     image_count: int
     text_characters: int
-    document_markdown: str
-    images_json: str
     quality: QualityReport
     page_quality: dict[str, QualityReport]
     ocr: dict[str, Any]
     remediated_pages: list[int]
-    preferred_agent_artifact: str
-    authoritative_artifact: str
-    available_artifacts: list[str]
-    attempts: list["AttemptManifest"]
+    spreadsheet: SpreadsheetMetadata
+
+
+class SourceSummary(TypedDict, total=False):
+    file: str
+    attachment: str
+    title: str
+    input_type: str
+    pipeline_family: str | None
+
+
+class AgentDecision(TypedDict):
+    status: QualityStatus
+    risk_level: RiskLevel
+    agent_ready: bool
+    read_order: list[str]
+
+
+class AgentManifest(TypedDict, total=False):
+    contract_version: str
+    producer: dict[str, str]
+    decision: AgentDecision
+    source: SourceSummary
+    artifacts: dict[str, str]
+    warnings: list[str]
+    reasons: list[str]
+    counts: dict[str, int]
+
+
+class EvidenceReport(TypedDict, total=False):
+    contract_version: str
+    producer: dict[str, str]
+    source: SourceSummary
     selected_attempt: str
     ocr_remediation_applied: bool
+    quality: QualityReport
+    attempts: list[AttemptManifest]
+    structured_document: dict[str, Any]
+    images: list[ImageSidecar]
+    page_quality: dict[str, QualityReport]
     spreadsheet: SpreadsheetMetadata
+    pdf_audit: dict[str, Any]
 
 
 class SourceMeta(TypedDict):

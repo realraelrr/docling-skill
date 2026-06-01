@@ -33,8 +33,6 @@ def _fake_attempt(input_path: Path) -> core.AttemptArtifacts:
             "page_count": 1,
             "image_count": 0,
             "text_characters": 32,
-            "document_markdown": "source.md",
-            "images_json": "source.images.json",
             "input_type": "pdf",
             "pipeline_family": "standard_pdf",
             "quality": {
@@ -75,8 +73,6 @@ def _fake_pdf_attempt(
             "page_count": 1,
             "image_count": 0,
             "text_characters": len(markdown_text),
-            "document_markdown": "source.md",
-            "images_json": "source.images.json",
             "ocr": {
                 "enabled": True,
                 "engine": "tesseract",
@@ -227,31 +223,34 @@ def test_cli_summary_prints_quality_risk_level(capsys):
     cli._print_conversion_summary(
         Path("/tmp/example.pdf"),
         {
-            "markdown_path": Path("/tmp/out/source.md"),
-            "docling_json_path": Path("/tmp/out/source.docling.json"),
-            "images_path": Path("/tmp/out/source.images.json"),
+            "content_path": Path("/tmp/out/source.md"),
+            "evidence_path": Path("/tmp/out/source.evidence.json"),
             "manifest_path": Path("/tmp/out/source.manifest.json"),
-            "meta_path": Path("/tmp/out/source.meta.json"),
-            "markdown_text": "# Title\n\nBody text.",
-            "images": [],
-            "meta": {"input_type": "pdf"},
+            "content_text": "# Title\n\nBody text.",
             "manifest": {
-                "selected_attempt": "primary",
-                "ocr_remediation_applied": False,
-                "quality": {
+                "source": {"input_type": "pdf"},
+                "decision": {
                     "status": "good",
                     "agent_ready": True,
                     "risk_level": "low",
+                    "read_order": ["source.md"],
                 },
+            },
+            "evidence": {
+                "images": [],
+                "selected_attempt": "primary",
+                "ocr_remediation_applied": False,
             },
         },
     )
 
     output = capsys.readouterr().out
     assert "Quality: good (risk_level=low, agent_ready=True)" in output
+    assert "Read order: source.md" in output
+    assert "Evidence: source.evidence.json" in output
 
 
-def test_build_attempt_manifest_sets_artifact_authority_fields():
+def test_build_attempt_manifest_keeps_heavy_fields_for_evidence_only():
     manifest = manifest_helpers._build_attempt_manifest(
         Path("/tmp/example.pdf"),
         input_type="pdf",
@@ -266,13 +265,10 @@ def test_build_attempt_manifest_sets_artifact_authority_fields():
         page_count=1,
     )
 
-    assert manifest["preferred_agent_artifact"] == "source.md"
-    assert manifest["authoritative_artifact"] == "source.docling.json"
-    assert manifest["available_artifacts"] == [
-        "source.md",
-        "source.docling.json",
-        "source.images.json",
-    ]
+    assert manifest["contract_version"] == "2.0"
+    assert "preferred_agent_artifact" not in manifest
+    assert "authoritative_artifact" not in manifest
+    assert "available_artifacts" not in manifest
     assert manifest["quality"]["risk_level"] == "low"
     assert manifest["quality"]["warnings"] == []
     assert manifest["quality"]["gate"] == "minimum_viability"
@@ -288,10 +284,8 @@ def test_output_sidecars_are_written_atomically_on_serialization_failure(
     output_dir.mkdir()
     existing_files = {
         "source.md": "old markdown",
-        "source.docling.json": '{"old": "docling"}',
-        "source.images.json": '[{"old": "image"}]',
         "source.manifest.json": '{"old": "manifest"}',
-        "source.meta.json": '{"old": "meta"}',
+        "source.evidence.json": '{"old": "evidence"}',
     }
     for filename, content in existing_files.items():
         (output_dir / filename).write_text(content, encoding="utf-8")
@@ -324,7 +318,7 @@ def test_output_sidecar_publish_preflights_non_file_targets(
     output_dir = tmp_path / "out"
     output_dir.mkdir()
     (output_dir / "source.md").write_text("old markdown", encoding="utf-8")
-    (output_dir / "source.docling.json").mkdir()
+    (output_dir / "source.evidence.json").mkdir()
 
     good_attempt = _fake_attempt(input_path)
 
@@ -341,7 +335,62 @@ def test_output_sidecar_publish_preflights_non_file_targets(
         )
 
     assert (output_dir / "source.md").read_text(encoding="utf-8") == "old markdown"
-    assert (output_dir / "source.docling.json").is_dir()
+    assert (output_dir / "source.evidence.json").is_dir()
+
+
+def test_manifest_is_published_after_evidence_as_commit_marker(tmp_path, monkeypatch):
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    (output_dir / "source.md").write_text("old markdown", encoding="utf-8")
+    (output_dir / "source.evidence.json").write_text('{"old": "evidence"}', encoding="utf-8")
+    (output_dir / "source.manifest.json").write_text('{"old": "manifest"}', encoding="utf-8")
+
+    original_replace = Path.replace
+
+    def fail_evidence_replace(self: Path, target: Path):
+        if self.name == "source.evidence.json":
+            raise RuntimeError("simulated evidence publish failure")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fail_evidence_replace)
+
+    with pytest.raises(RuntimeError, match="simulated evidence publish failure"):
+        core._write_sidecars_with_staging(
+            output_dir,
+            markdown_text="new markdown",
+            manifest={"new": "manifest"},
+            evidence={"new": "evidence"},
+        )
+
+    assert (output_dir / "source.manifest.json").read_text(encoding="utf-8") == '{"old": "manifest"}'
+
+
+def test_successful_publish_removes_stale_v1_sidecars(tmp_path, monkeypatch):
+    input_path = tmp_path / "example.pdf"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    for filename in ("source.docling.json", "source.images.json", "source.meta.json"):
+        (output_dir / filename).write_text("stale", encoding="utf-8")
+
+    good_attempt = _fake_attempt(input_path)
+
+    monkeypatch.setattr(
+        core,
+        "_dispatch_conversion",
+        lambda *args, **kwargs: (good_attempt, [good_attempt.manifest]),
+    )
+
+    core.convert_document_to_ingestion_outputs(
+        input_path=input_path,
+        output_dir=output_dir,
+    )
+
+    assert (output_dir / "source.md").exists()
+    assert (output_dir / "source.manifest.json").exists()
+    assert (output_dir / "source.evidence.json").exists()
+    assert not (output_dir / "source.docling.json").exists()
+    assert not (output_dir / "source.images.json").exists()
+    assert not (output_dir / "source.meta.json").exists()
 
 
 def test_output_contract_uses_source_sidecars(tmp_path, monkeypatch):
@@ -364,35 +413,37 @@ def test_output_contract_uses_source_sidecars(tmp_path, monkeypatch):
         output_dir=output_dir,
     )
 
-    assert outputs["markdown_path"].name == "source.md"
-    assert outputs["images_path"].name == "source.images.json"
-    assert outputs["docling_json_path"].name == "source.docling.json"
+    assert outputs["content_path"].name == "source.md"
+    assert outputs["evidence_path"].name == "source.evidence.json"
     assert outputs["manifest_path"].name == "source.manifest.json"
-    assert outputs["meta_path"].name == "source.meta.json"
-    assert outputs["docling_document"] == {
+    assert "markdown_path" not in outputs
+    assert "images_path" not in outputs
+    assert "docling_json_path" not in outputs
+    assert "meta_path" not in outputs
+    assert outputs["evidence"]["structured_document"] == {
         "schema_name": "DoclingDocument",
         "name": input_path.name,
     }
+    assert not (output_dir / "source.docling.json").exists()
+    assert not (output_dir / "source.images.json").exists()
+    assert not (output_dir / "source.meta.json").exists()
 
     manifest = json.loads(outputs["manifest_path"].read_text(encoding="utf-8"))
-    assert manifest["document_markdown"] == "source.md"
-    assert manifest["images_json"] == "source.images.json"
-    assert manifest["preferred_agent_artifact"] == "source.md"
-    assert manifest["authoritative_artifact"] == "source.docling.json"
-    assert manifest["available_artifacts"] == [
-        "source.md",
-        "source.docling.json",
-        "source.images.json",
-    ]
-    assert manifest["input_type"] == "pdf"
-    assert manifest["pipeline_family"] == "standard_pdf"
+    assert manifest["contract_version"] == "2.0"
+    assert manifest["artifacts"] == {
+        "content": "source.md",
+        "evidence": "source.evidence.json",
+    }
+    assert manifest["decision"]["read_order"] == ["source.md"]
+    assert manifest["source"]["input_type"] == "pdf"
+    assert manifest["source"]["pipeline_family"] == "standard_pdf"
+    assert "quality" not in manifest
+    assert "attempts" not in manifest
+    assert "page_quality" not in manifest
 
-    meta = json.loads(outputs["meta_path"].read_text(encoding="utf-8"))
-    assert meta["input_type"] == "pdf"
-    assert meta["pipeline_family"] == "standard_pdf"
-
-    docling_json = json.loads(outputs["docling_json_path"].read_text(encoding="utf-8"))
-    assert docling_json == outputs["docling_document"]
+    evidence = json.loads(outputs["evidence_path"].read_text(encoding="utf-8"))
+    assert evidence == outputs["evidence"]
+    assert evidence["structured_document"] == outputs["evidence"]["structured_document"]
 
 
 def test_pdf_remediation_selection_preserves_salvaged_manifest(tmp_path, monkeypatch):
@@ -439,41 +490,26 @@ def test_pdf_remediation_selection_preserves_salvaged_manifest(tmp_path, monkeyp
     )
 
     manifest = outputs["manifest"]
-    assert outputs["markdown_text"] == remediated_attempt.markdown_text
-    assert outputs["docling_document"] == remediated_attempt.structured_document
-    assert manifest["selected_attempt"] == "page_ocr_remediation"
-    assert manifest["ocr_remediation_applied"] is True
-    assert manifest["preferred_agent_artifact"] == "source.md"
-    assert manifest["authoritative_artifact"] == "source.docling.json"
-    assert manifest["available_artifacts"] == [
-        "source.md",
-        "source.docling.json",
-        "source.images.json",
-    ]
-    assert len(manifest["attempts"]) == 2
-    assert manifest["attempts"][0]["attempt"] == "primary"
-    assert manifest["attempts"][1]["attempt"] == "page_ocr_remediation"
-    assert manifest["attempts"][0]["preferred_agent_artifact"] == "source.md"
-    assert manifest["attempts"][0]["authoritative_artifact"] == "source.docling.json"
-    assert manifest["attempts"][0]["available_artifacts"] == [
-        "source.md",
-        "source.docling.json",
-        "source.images.json",
-    ]
-    assert manifest["attempts"][1]["preferred_agent_artifact"] == "source.md"
-    assert manifest["attempts"][1]["authoritative_artifact"] == "source.docling.json"
-    assert manifest["attempts"][1]["available_artifacts"] == [
-        "source.md",
-        "source.docling.json",
-        "source.images.json",
-    ]
-    assert manifest["quality"]["status"] == "salvaged"
-    assert "ocr_remediation_selected" in manifest["quality"]["reasons"]
-    assert manifest["quality"]["risk_level"] == "medium"
-    assert "ocr_remediation_selected" in manifest["quality"]["warnings"]
+    evidence = outputs["evidence"]
+    assert outputs["content_text"] == remediated_attempt.markdown_text
+    assert evidence["structured_document"] == remediated_attempt.structured_document
+    assert manifest["decision"]["status"] == "salvaged"
+    assert manifest["decision"]["risk_level"] == "medium"
+    assert manifest["decision"]["read_order"] == ["source.md", "source.evidence.json"]
+    assert "ocr_remediation_selected" in manifest["reasons"]
+    assert "ocr_remediation_selected" in manifest["warnings"]
+    assert "quality" not in manifest
+    assert "attempts" not in manifest
 
-    meta = outputs["meta"]
-    assert meta["quality_status"] == "salvaged"
+    assert evidence["selected_attempt"] == "page_ocr_remediation"
+    assert evidence["ocr_remediation_applied"] is True
+    assert len(evidence["attempts"]) == 2
+    assert evidence["attempts"][0]["attempt"] == "primary"
+    assert evidence["attempts"][1]["attempt"] == "page_ocr_remediation"
+    assert evidence["quality"]["status"] == "salvaged"
+    assert "ocr_remediation_selected" in evidence["quality"]["reasons"]
+    assert evidence["quality"]["risk_level"] == "medium"
+    assert "ocr_remediation_selected" in evidence["quality"]["warnings"]
 
 
 def test_pdf_attempt_fails_when_page_quality_fails_in_short_document(tmp_path):

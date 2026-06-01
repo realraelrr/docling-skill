@@ -7,7 +7,8 @@
 Use it when an agent needs risk-aware local PDF, Office, image, HTML, text, or
 Markdown conversion before downstream reasoning, retrieval, wiki ingestion, or
 handoff. The key output is not just Markdown; it is an inspectable manifest with
-minimum viability gates, risk level, warnings, and evidence signals.
+minimum viability gates, risk level, warnings, and a pointer to on-demand
+evidence.
 
 ## What It Does
 
@@ -16,45 +17,46 @@ Supported local inputs: `pdf`, `docx`, `pptx`, `xls`, `xlsx`, `csv`, `html`, `tx
 Legacy `.doc` and `.ppt` files are intentionally not supported. Save them as
 `.docx`/`.pptx` or PDF before ingestion.
 
-Each successful conversion writes:
+Each successful conversion writes an agent-only v2 sidecar set:
 
 | Artifact | Purpose |
 | --- | --- |
-| `source.manifest.json` | Quality risk, routing, remediation, and evidence metadata |
 | `source.md` | Default agent-readable Markdown, with narrow CJK cleanup applied for agent use |
-| `source.docling.json` | Authoritative structured Docling export from the same conversion result; kept as Docling's structured output |
-| `source.images.json` | Always-written image sidecar list; empty when extraction is unavailable or no images are found |
-| `source.meta.json` | Lightweight ingestion metadata for downstream workflows |
+| `source.manifest.json` | Compact agent decision metadata and read order |
+| `source.evidence.json` | On-demand structured Docling export, quality signals, attempts, coverage, image sidecars, and optional PDF audit evidence |
 
 `source.manifest.json` includes top-level contract metadata for downstream
 agents:
 
-- `contract_version`: current sidecar contract version, currently `1.2`
+- `contract_version`: current sidecar contract version, currently `2.0`
 - `producer.name`: `docling-skill`
 - `producer.version`: package version that produced the sidecars
 - `producer.docling_version` and `producer.docling_core_version`: parser runtime versions
+- `decision`: `status`, `risk_level`, `agent_ready`, and `read_order`
+- `source`: source file, attachment name, inferred title, input type, and pipeline family
+- `artifacts`: the compact content and evidence filenames
 
 Downstream rule:
 
 1. Read `source.manifest.json` first.
-2. Inspect `quality.status`, `quality.risk_level`, `quality.warnings`, and `quality.signals`.
-3. If `quality.agent_ready` is true, `source.md` is usable as the default agent input.
-4. Use `source.docling.json` when structure, recovery, or deeper inspection matters.
-5. Resolve image placeholders such as `[[image:picture-p2-1]]` through `source.images.json`.
+2. Follow `decision.read_order`.
+3. For low-risk `good` output, read only `source.md` by default.
+4. For warnings, `salvaged`, `failed_for_agent`, image placeholders, structure recovery, or spreadsheet details, read `source.evidence.json`.
 
 The automatic quality model is a risk screen, not a semantic audit. A low-risk
 result means no hard failure was detected; it does not prove source fidelity or
 complete source-to-Markdown alignment. Medium-risk `good` output is still
-agent-usable by default, but its `warnings` and `signals` should be inspected.
+agent-usable by default, but its manifest `warnings` and evidence `quality.signals`
+should be inspected.
 For long PDFs, isolated page failures can be downgraded to medium risk instead
-of hard failure; inspect `quality.signals.page_coverage`, especially
+of hard failure; inspect `source.evidence.json` `quality.signals.page_coverage`, especially
 `first_page_failed`, before relying on front matter, title, or abstract text.
 
 For Chinese-heavy documents, `source.md` receives targeted Markdown cleanup for
 CJK compatibility glyphs and abnormal spaces between Chinese characters. The
-manifest records this under `quality.signals.text_normalization`, while
-`source.docling.json` remains the structured Docling export for recovery and
-deeper inspection.
+evidence records this under `quality.signals.text_normalization`, while
+`source.evidence.json` keeps Docling's structured export for recovery and deeper
+inspection.
 
 Image inputs use the same agent-readiness gate as OCR-oriented extraction. An
 image-only result with no usable OCR text is reported as high risk and
@@ -65,14 +67,14 @@ image-only result with no usable OCR text is reported as high risk and
 ## Install
 
 ```bash
-pip install "git+https://github.com/realraelrr/docling-skill.git@v1.2.1"
+pip install "git+https://github.com/realraelrr/docling-skill.git@v2.0.0"
 docling-skill "/path/to/file.pdf" "/tmp/docling-sidecar"
 ```
 
 If your environment uses SOCKS proxies:
 
 ```bash
-pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v1.2.1"
+pip install "docling-skill[proxy] @ git+https://github.com/realraelrr/docling-skill.git@v2.0.0"
 ```
 
 For local development:
@@ -104,12 +106,17 @@ PDF-oriented OCR options:
 --ocr-lang <lang>
 --force-full-page-ocr
 --no-ocr-remediation
+--pdf-audit
 ```
+
+`--pdf-audit` records audit intent for eligible native formats. PDF audit
+rendering is a soft, currently unavailable evidence path; native conversion
+remains the primary path.
 
 Manifest check:
 
 ```bash
-python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); q = m["quality"]; print({"status": q["status"], "risk_level": q["risk_level"], "agent_ready": q["agent_ready"], "warnings": q["warnings"], "selected_attempt": m["selected_attempt"]})'
+python3 -c 'import json, pathlib; p = pathlib.Path("/tmp/docling-sidecar/source.manifest.json"); m = json.loads(p.read_text(encoding="utf-8")); d = m["decision"]; print({"status": d["status"], "risk_level": d["risk_level"], "agent_ready": d["agent_ready"], "read_order": d["read_order"], "warnings": m["warnings"]})'
 ```
 
 Python API:
@@ -125,17 +132,15 @@ outputs = convert_document_to_ingestion_outputs(
 )
 
 manifest = outputs["manifest"]
-if not manifest["quality"]["agent_ready"]:
-    raise RuntimeError(manifest["quality"])
+if not manifest["decision"]["agent_ready"]:
+    raise RuntimeError(manifest)
 
-if manifest["quality"]["risk_level"] != "low":
-    print(manifest["quality"]["warnings"])
-    print(manifest["quality"]["signals"])
+if "source.evidence.json" in manifest["decision"]["read_order"]:
+    print(outputs["evidence"]["quality"]["signals"])
 
-markdown_text = outputs["markdown_text"]
-structured_document = outputs["docling_document"]
-images = outputs["images"]
-meta = outputs["meta"]
+content_text = outputs["content_text"]
+structured_document = outputs["evidence"]["structured_document"]
+images = outputs["evidence"]["images"]
 ```
 
 ## Skill Integration
@@ -172,7 +177,7 @@ conda run -n docling python "$HOME/.codex/skills/.system/skill-creator/scripts/q
 conda run -n docling python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" .claude/skills/docling-skill
 
 conda run -n docling python -m ruff check .
-conda run -n docling python -m pytest
+PYTHONPATH="$PWD/src" conda run -n docling python -m pytest
 ```
 
 ## Scope

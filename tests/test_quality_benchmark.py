@@ -6,7 +6,7 @@ import docling_skill.core as core
 
 
 def _quality(outputs: dict[str, object]) -> dict[str, object]:
-    return outputs["manifest"]["quality"]  # type: ignore[index,return-value]
+    return outputs["evidence"]["quality"]  # type: ignore[index,return-value]
 
 
 def test_quality_benchmark_keeps_markdown_note_low_risk(tmp_path: Path):
